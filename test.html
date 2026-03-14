@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FastPackCloudron Generator Tests</title>
+  <style>
+    body { font-family: monospace; margin: 2em; background: #1a1a2e; color: #e0e0e0; }
+    h1 { color: #0ff; }
+    .pass { color: #0f0; }
+    .fail { color: #f44; font-weight: bold; }
+    .suite { margin-top: 1.5em; color: #aaf; font-size: 1.1em; }
+    #results { white-space: pre-wrap; }
+    #summary { margin-top: 2em; font-size: 1.2em; padding: 1em; border-radius: 4px; }
+    #summary.all-pass { background: #0a3a0a; color: #0f0; }
+    #summary.has-fail { background: #3a0a0a; color: #f44; }
+  </style>
+</head>
+<body>
+  <h1>FastPackCloudron Generator Tests</h1>
+  <div id="results"></div>
+  <div id="summary"></div>
+
+  <script type="module">
+    import {
+      sanitizeImageName,
+      humanizeImageName,
+      generateManifest,
+      generateDockerfile,
+      generateStartSh,
+      generateDockerignore,
+      generateReadme,
+    } from "./generators.js";
+
+    const results = document.getElementById("results");
+    const summary = document.getElementById("summary");
+    let passed = 0;
+    let failed = 0;
+
+    function addSuite(name) {
+      const el = document.createElement("div");
+      el.className = "suite";
+      el.textContent = "--- " + name + " ---";
+      results.appendChild(el);
+    }
+
+    function assert(description, actual, expected) {
+      const el = document.createElement("div");
+      if (actual === expected) {
+        el.className = "pass";
+        el.textContent = "PASS: " + description;
+        passed++;
+      } else {
+        el.className = "fail";
+        el.textContent = "FAIL: " + description;
+        results.appendChild(el);
+        const detail = document.createElement("div");
+        detail.className = "fail";
+        detail.textContent = "  expected: " + JSON.stringify(expected) + "\n  actual:   " + JSON.stringify(actual);
+        results.appendChild(detail);
+        failed++;
+        return;
+      }
+      results.appendChild(el);
+    }
+
+    function assertIncludes(description, haystack, needle) {
+      const el = document.createElement("div");
+      if (haystack.includes(needle)) {
+        el.className = "pass";
+        el.textContent = "PASS: " + description;
+        passed++;
+      } else {
+        el.className = "fail";
+        el.textContent = "FAIL: " + description + " (string does not include expected substring)";
+        results.appendChild(el);
+        const detail = document.createElement("div");
+        detail.className = "fail";
+        detail.textContent = "  looking for: " + JSON.stringify(needle) + "\n  in: " + JSON.stringify(haystack.substring(0, 300));
+        results.appendChild(detail);
+        failed++;
+        return;
+      }
+      results.appendChild(el);
+    }
+
+    function assertNotIncludes(description, haystack, needle) {
+      const el = document.createElement("div");
+      if (!haystack.includes(needle)) {
+        el.className = "pass";
+        el.textContent = "PASS: " + description;
+        passed++;
+      } else {
+        el.className = "fail";
+        el.textContent = "FAIL: " + description + " (string should NOT include substring but does)";
+        results.appendChild(el);
+        const detail = document.createElement("div");
+        detail.className = "fail";
+        detail.textContent = "  should not contain: " + JSON.stringify(needle);
+        results.appendChild(detail);
+        failed++;
+        return;
+      }
+      results.appendChild(el);
+    }
+
+    // ========================================
+    // sanitizeImageName
+    // ========================================
+    addSuite("sanitizeImageName");
+
+    assert("simple image", sanitizeImageName("nginx"), "nginx");
+    assert("with tag", sanitizeImageName("eclipse-mosquitto:2.0"), "eclipse.mosquitto");
+    assert("with registry", sanitizeImageName("registry.example.com/myimage:v1"), "myimage");
+    assert("underscores", sanitizeImageName("my_app"), "my.app");
+    assert("hyphens and underscores", sanitizeImageName("my-cool_app"), "my.cool.app");
+    assert("leading digits", sanitizeImageName("123abc"), "abc");
+    assert("all-digit name", sanitizeImageName("123"), "");
+    assert("deep registry path", sanitizeImageName("ghcr.io/org/sub/my-image:latest"), "my.image");
+
+    // ========================================
+    // humanizeImageName
+    // ========================================
+    addSuite("humanizeImageName");
+
+    assert("simple", humanizeImageName("nginx"), "Nginx");
+    assert("hyphens", humanizeImageName("eclipse-mosquitto:2.0"), "Eclipse Mosquitto");
+    assert("registry", humanizeImageName("registry.example.com/myimage:v1"), "Myimage");
+    assert("underscores", humanizeImageName("my_cool_app"), "My Cool App");
+
+    // ========================================
+    // generateManifest
+    // ========================================
+    addSuite("generateManifest");
+
+    // Basic config
+    const basicConfig = {
+      id: "com.example.test",
+      title: "Test App",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: null,
+      sso: null,
+      addons: ["localstorage"],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      description: "",
+    };
+    const basicManifest = JSON.parse(generateManifest(basicConfig));
+    assert("basic: manifestVersion is 2", basicManifest.manifestVersion, 2);
+    assert("basic: id", basicManifest.id, "com.example.test");
+    assert("basic: optionalSso when sso=null", basicManifest.optionalSso, true);
+    assert("basic: localstorage addon present", JSON.stringify(basicManifest.addons.localstorage), "{}");
+    assert("basic: no tcpPorts when empty", basicManifest.tcpPorts, undefined);
+
+    // Full config
+    const fullConfig = {
+      id: "com.example.full",
+      title: "Full App",
+      version: "2.0.0",
+      httpPort: 3000,
+      healthCheckPath: "/health",
+      hasWebUI: true,
+      database: "postgresql",
+      sso: "oidc",
+      addons: ["localstorage", "sendmail"],
+      tcpPorts: [{ name: "MQTT_PORT", title: "MQTT", containerPort: 1883, defaultValue: 1883 }],
+      udpPorts: [],
+      author: "Test Author",
+      description: "A test app",
+    };
+    const fullManifest = JSON.parse(generateManifest(fullConfig));
+    assert("full: postgresql addon", JSON.stringify(fullManifest.addons.postgresql), "{}");
+    assert("full: oidc loginRedirectUri", fullManifest.addons.oidc.loginRedirectUri, "/auth/callback");
+    assert("full: no optionalSso with oidc", fullManifest.optionalSso, undefined);
+    assert("full: tcpPorts present", fullManifest.tcpPorts.MQTT_PORT.containerPort, 1883);
+    assert("full: sendmail addon", JSON.stringify(fullManifest.addons.sendmail), "{}");
+
+    // LDAP config
+    const ldapConfig = {
+      id: "com.example.ldap",
+      title: "LDAP App",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: null,
+      sso: "ldap",
+      addons: [],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      description: "",
+    };
+    const ldapManifest = JSON.parse(generateManifest(ldapConfig));
+    assert("ldap: ldap addon present", JSON.stringify(ldapManifest.addons.ldap), "{}");
+    assert("ldap: no optionalSso with ldap", ldapManifest.optionalSso, undefined);
+
+    // UDP ports config
+    const udpConfig = {
+      id: "com.example.udp",
+      title: "UDP App",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: false,
+      database: null,
+      sso: null,
+      addons: [],
+      tcpPorts: [],
+      udpPorts: [{ name: "DNS_PORT", title: "DNS", containerPort: 53, defaultValue: 5353 }],
+      author: "",
+      description: "",
+    };
+    const udpManifest = JSON.parse(generateManifest(udpConfig));
+    assert("udp: udpPorts present", udpManifest.udpPorts.DNS_PORT.containerPort, 53);
+
+    // ========================================
+    // generateDockerfile
+    // ========================================
+    addSuite("generateDockerfile");
+
+    // Web mode
+    const webDockerConfig = {
+      image: "nginx:latest",
+      httpPort: 8080,
+      hasWebUI: true,
+      tcpPorts: [],
+      udpPorts: [],
+    };
+    const webDockerfile = generateDockerfile(webDockerConfig);
+    assertIncludes("web: FROM", webDockerfile, "FROM nginx:latest");
+    assertIncludes("web: EXPOSE only httpPort", webDockerfile, "EXPOSE 8080");
+    assertIncludes("web: CMD", webDockerfile, 'CMD ["/app/code/start.sh"]');
+
+    // TCP mode
+    const tcpDockerConfig = {
+      image: "eclipse-mosquitto:2.0",
+      httpPort: 8080,
+      hasWebUI: false,
+      tcpPorts: [{ name: "MQTT_PORT", title: "MQTT", containerPort: 1883, defaultValue: 1883 }],
+      udpPorts: [],
+    };
+    const tcpDockerfile = generateDockerfile(tcpDockerConfig);
+    assertIncludes("tcp: EXPOSE includes tcp port", tcpDockerfile, "1883");
+
+    // UDP mode
+    const udpDockerConfig = {
+      image: "coredns:latest",
+      httpPort: 8080,
+      hasWebUI: false,
+      tcpPorts: [],
+      udpPorts: [{ name: "DNS_PORT", title: "DNS", containerPort: 53, defaultValue: 5353 }],
+    };
+    const udpDockerfile = generateDockerfile(udpDockerConfig);
+    assertIncludes("udp: EXPOSE uses /udp syntax", udpDockerfile, "53/udp");
+
+    // ========================================
+    // generateStartSh
+    // ========================================
+    addSuite("generateStartSh");
+
+    // Web mode with localstorage
+    const webStartConfig = {
+      httpPort: 8080,
+      hasWebUI: true,
+      addons: ["localstorage"],
+    };
+    const webStart = generateStartSh(webStartConfig);
+    assertIncludes("web: shebang", webStart, "#!/bin/sh");
+    assertIncludes("web: exec", webStart, "exec");
+    assertNotIncludes("web: no python", webStart, "python");
+    assertIncludes("web: chown with localstorage", webStart, "chown");
+    assertIncludes("web: initialized guard", webStart, ".initialized");
+
+    // TCP mode without localstorage
+    const tcpStartConfig = {
+      httpPort: 8080,
+      hasWebUI: false,
+      addons: [],
+    };
+    const tcpStart = generateStartSh(tcpStartConfig);
+    assertIncludes("tcp: python healthcheck", tcpStart, "python");
+    assertIncludes("tcp: wait", tcpStart, "wait");
+    assertNotIncludes("tcp: no chown without localstorage", tcpStart, "chown");
+
+    // TCP mode with localstorage
+    const tcpStorageConfig = {
+      httpPort: 9090,
+      hasWebUI: false,
+      addons: ["localstorage"],
+    };
+    const tcpStorageStart = generateStartSh(tcpStorageConfig);
+    assertIncludes("tcp+storage: python healthcheck", tcpStorageStart, "python");
+    assertIncludes("tcp+storage: chown", tcpStorageStart, "chown");
+    assertIncludes("tcp+storage: wait", tcpStorageStart, "wait");
+
+    // ========================================
+    // generateDockerignore
+    // ========================================
+    addSuite("generateDockerignore");
+
+    const dockerignore = generateDockerignore();
+    assertIncludes("has .git", dockerignore, ".git");
+    assertIncludes("has README.md", dockerignore, "README.md");
+
+    // ========================================
+    // generateReadme
+    // ========================================
+    addSuite("generateReadme");
+
+    const readmeConfig = {
+      id: "com.example.test",
+      title: "Test App",
+    };
+    const readme = generateReadme(readmeConfig);
+    assertIncludes("has title", readme, "# Test App");
+    assertIncludes("cloudron build", readme, "cloudron build");
+    assertIncludes("cloudron install", readme, "cloudron install");
+    assertIncludes("non-root caveat", readme, "non-root");
+
+    // ========================================
+    // Summary
+    // ========================================
+    const total = passed + failed;
+    const summaryText = passed + "/" + total + " tests passed" + (failed > 0 ? ", " + failed + " FAILED" : "");
+    const summaryEl = document.createTextNode(summaryText);
+    summary.appendChild(summaryEl);
+    if (failed === 0) {
+      summary.className = "all-pass";
+    } else {
+      summary.className = "has-fail";
+    }
+  </script>
+</body>
+</html>
