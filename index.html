@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FastPackCloudron</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>">
+  <style>
+    :root {
+      --primary: #0070f3;
+      --primary-hover: #0060d0;
+      --bg: #f8f9fa;
+      --card-bg: white;
+      --text: #333;
+      --border: #ddd;
+      --error: #e53e3e;
+      --warning: #dd6b20;
+      --success: #38a169;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui;
+      margin: 0;
+    }
+
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    h1 {
+      color: var(--primary);
+    }
+
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      padding: 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 1rem;
+      box-sizing: border-box;
+    }
+
+    .field-error {
+      color: var(--error);
+      font-size: 0.85rem;
+      display: block;
+      min-height: 1.2em;
+    }
+
+    details {
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0 1rem;
+      margin-bottom: 1rem;
+    }
+
+    summary {
+      padding: 0.75rem 0;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    details[open] > summary {
+      margin-bottom: 0.5rem;
+    }
+
+    .radio-group {
+      display: flex;
+      gap: 1rem;
+    }
+
+    #download-btn {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 0.75rem 2rem;
+      border-radius: 4px;
+      font-size: 1.1rem;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 1rem;
+    }
+
+    #download-btn:hover {
+      background: var(--primary-hover);
+    }
+
+    .add-port-btn {
+      background: transparent;
+      border: 1px dashed var(--border);
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+
+    .port-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+      align-items: center;
+    }
+
+    .port-row input {
+      flex: 1;
+    }
+
+    .remove-port {
+      background: none;
+      border: none;
+      color: var(--error);
+      cursor: pointer;
+      font-size: 1.2rem;
+      padding: 0.25rem;
+    }
+
+    .preview-tabs {
+      display: flex;
+      gap: 0;
+      border-bottom: 2px solid var(--border);
+      margin-bottom: 0;
+    }
+
+    .preview-tab {
+      padding: 0.5rem 1rem;
+      border: none;
+      background: none;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      font-size: 0.85rem;
+    }
+
+    .preview-tab.active {
+      border-bottom-color: var(--primary);
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .preview-content {
+      display: none;
+    }
+
+    .preview-content.active {
+      display: block;
+    }
+
+    pre {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 1rem;
+      border-radius: 0 0 4px 4px;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      margin-top: 0;
+    }
+
+    .warning {
+      background: #fff3cd;
+      color: var(--warning);
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      margin-bottom: 0.5rem;
+      font-size: 0.9rem;
+    }
+
+    .error {
+      background: #fee;
+      color: var(--error);
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      margin-bottom: 0.5rem;
+    }
+
+    @media (max-width: 600px) {
+      .port-row { flex-wrap: wrap; }
+      .container { padding: 1rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>FastPackCloudron</h1>
+      <p>Generate Cloudron custom app packages in 3 clicks</p>
+    </header>
+
+    <main>
+      <div class="form-group">
+        <label for="docker-image">Docker Image</label>
+        <input type="text" id="docker-image" placeholder="e.g., eclipse-mosquitto:2.0">
+        <span class="field-error" data-error-for="docker-image"></span>
+      </div>
+
+      <div class="form-group">
+        <label for="database">Database</label>
+        <select id="database">
+          <option value="">None</option>
+          <option value="postgresql">PostgreSQL</option>
+          <option value="mysql">MySQL</option>
+          <option value="mongodb">MongoDB</option>
+          <option value="redis">Redis</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="sso">Single Sign-On</label>
+        <select id="sso">
+          <option value="">None</option>
+          <option value="proxyAuth">ProxyAuth</option>
+          <option value="oidc">OIDC</option>
+          <option value="ldap">LDAP</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Web Interface</label>
+        <div class="radio-group">
+          <label><input type="radio" name="web-ui" id="web-ui-yes" value="yes" checked> Yes</label>
+          <label><input type="radio" name="web-ui" id="web-ui-no" value="no"> No</label>
+        </div>
+      </div>
+
+      <details>
+        <summary>Customize metadata</summary>
+        <div class="form-group">
+          <label for="app-id">App ID</label>
+          <input type="text" id="app-id" placeholder="io.fastpack.myapp">
+          <span class="field-error" data-error-for="app-id"></span>
+        </div>
+        <div class="form-group">
+          <label for="app-title">Title</label>
+          <input type="text" id="app-title" placeholder="My App">
+        </div>
+        <div class="form-group">
+          <label for="app-version">Version</label>
+          <input type="text" id="app-version" value="1.0.0">
+        </div>
+        <div class="form-group">
+          <label for="app-author">Author</label>
+          <input type="text" id="app-author" placeholder="Your Name">
+        </div>
+        <div class="form-group">
+          <label for="app-description">Description</label>
+          <textarea id="app-description" placeholder="App description"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="health-check-path">Health Check Path</label>
+          <input type="text" id="health-check-path" value="/">
+          <span class="field-error" data-error-for="health-check-path"></span>
+        </div>
+        <div class="form-group" id="http-port-group">
+          <label for="http-port">HTTP Port</label>
+          <input type="number" id="http-port" value="8000">
+          <span class="field-error" data-error-for="http-port"></span>
+        </div>
+      </details>
+
+      <details>
+        <summary>Customize addons</summary>
+        <div class="form-group">
+          <label><input type="checkbox" class="addon-checkbox" value="localstorage" checked> localstorage</label>
+          <label><input type="checkbox" class="addon-checkbox" value="sendmail"> sendmail</label>
+          <label><input type="checkbox" class="addon-checkbox" value="recvmail"> recvmail</label>
+          <label><input type="checkbox" class="addon-checkbox" value="scheduler"> scheduler</label>
+          <label><input type="checkbox" class="addon-checkbox" value="tls"> TLS</label>
+          <label><input type="checkbox" class="addon-checkbox" value="turn"> TURN</label>
+          <label><input type="checkbox" class="addon-checkbox" value="docker"> Docker</label>
+        </div>
+      </details>
+
+      <details>
+        <summary>Customize ports</summary>
+        <h4>TCP Ports</h4>
+        <div id="tcp-ports-list"></div>
+        <button class="add-port-btn" id="add-tcp-port">Add TCP port</button>
+
+        <h4>UDP Ports</h4>
+        <div id="udp-ports-list"></div>
+        <button class="add-port-btn" id="add-udp-port">Add UDP port</button>
+
+        <span class="field-error" data-error-for="ports"></span>
+      </details>
+
+      <div id="errors"></div>
+      <div id="warnings"></div>
+
+      <button id="download-btn">Download ZIP</button>
+    </main>
+
+    <section>
+      <div class="preview-tabs">
+        <button class="preview-tab active" data-target="manifest">manifest</button>
+        <button class="preview-tab" data-target="dockerfile">dockerfile</button>
+        <button class="preview-tab" data-target="startsh">startsh</button>
+        <button class="preview-tab" data-target="dockerignore">dockerignore</button>
+        <button class="preview-tab" data-target="readme">readme</button>
+      </div>
+      <div class="preview-content active" data-panel="manifest"><pre><code id="preview-manifest"></code></pre></div>
+      <div class="preview-content" data-panel="dockerfile"><pre><code id="preview-dockerfile"></code></pre></div>
+      <div class="preview-content" data-panel="startsh"><pre><code id="preview-startsh"></code></pre></div>
+      <div class="preview-content" data-panel="dockerignore"><pre><code id="preview-dockerignore"></code></pre></div>
+      <div class="preview-content" data-panel="readme"><pre><code id="preview-readme"></code></pre></div>
+    </section>
+
+    <footer>
+      <p>Powered by <a href="https://cloudron.io">Cloudron</a> &mdash; <a href="https://docs.cloudron.io/packaging/">Packaging docs</a></p>
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/file-saver@2/dist/FileSaver.min.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
