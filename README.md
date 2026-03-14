@@ -52,6 +52,10 @@ Open `http://localhost:8080` in your browser.
 
 Run tests: open `http://localhost:8080/test.html` (47 unit tests).
 
+## Support
+
+[![Fuel my projects](https://img.shields.io/badge/%E2%9A%A1%20Fuel%20my%20projects%20%E2%98%95-111827?style=for-the-badge&labelColor=FFDD00&color=111827)](https://www.buymeacoffee.com/jbjardine)
+
 ## License
 
 MIT
