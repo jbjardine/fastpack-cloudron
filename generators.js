@@ -136,8 +136,21 @@ export function generateDockerfile(config) {
   lines.push("");
   lines.push("RUN mkdir -p /app/code");
   lines.push("");
-  lines.push("# Install gosu for dropping privileges (Cloudron convention)");
-  lines.push("RUN apt-get update && apt-get install -y gosu && rm -rf /var/lib/apt/lists/*");
+  lines.push("# Install gosu (or su-exec fallback) only when the base image supports it");
+  lines.push(`RUN set -eux; \\
+    if command -v apt-get >/dev/null 2>&1; then \\
+      apt-get update; \\
+      apt-get install -y --no-install-recommends gosu; \\
+      rm -rf /var/lib/apt/lists/*; \\
+    elif command -v apk >/dev/null 2>&1; then \\
+      apk add --no-cache su-exec; \\
+      ln -sf /sbin/su-exec /usr/local/bin/gosu; \\
+    else \\
+      echo \"No supported package manager found; creating a passthrough gosu shim\"; \\
+      mkdir -p /usr/local/bin; \\
+      printf '#!/bin/sh\\nshift\\nexec \"$@\"\\n' > /usr/local/bin/gosu; \\
+      chmod +x /usr/local/bin/gosu; \\
+    fi`);
   lines.push("");
   lines.push("COPY start.sh /app/code/start.sh");
   lines.push("RUN chmod +x /app/code/start.sh");
