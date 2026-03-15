@@ -248,6 +248,27 @@
     assert("ldap: ldap addon present", JSON.stringify(ldapManifest.addons.ldap), "{}");
     assert("ldap: no optionalSso with ldap", ldapManifest.optionalSso, undefined);
 
+    // SimpleAuth config
+    const simpleAuthConfig = {
+      id: "com.example.simple",
+      title: "Simple App",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: null,
+      sso: "simpleAuth",
+      addons: [],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+    };
+    const simpleManifest = JSON.parse(generateManifest(simpleAuthConfig));
+    assert("simpleauth: lowercase key in manifest", JSON.stringify(simpleManifest.addons.simpleauth), "{}");
+    assert("simpleauth: no optionalSso", simpleManifest.optionalSso, undefined);
+
     // UDP ports config
     const udpConfig = {
       id: "com.example.udp",
@@ -290,6 +311,8 @@
       configurePath: "/admin",
       upstreamVersion: "3.2.1",
       postInstallMessage: "Welcome!",
+      changelog: "## 1.0.0\n- Initial release",
+      icon: "file://icon.png",
       memoryLimit: 536870912,
     };
     const pubManifest = JSON.parse(generateManifest(publishConfig));
@@ -300,6 +323,8 @@
     assert("pub: configurePath", pubManifest.configurePath, "/admin");
     assert("pub: upstreamVersion", pubManifest.upstreamVersion, "3.2.1");
     assert("pub: postInstallMessage", pubManifest.postInstallMessage, "Welcome!");
+    assert("pub: changelog", pubManifest.changelog, "## 1.0.0\n- Initial release");
+    assert("pub: icon", pubManifest.icon, "file://icon.png");
     assert("pub: memoryLimit", pubManifest.memoryLimit, 536870912);
 
     // No publishing fields when empty
@@ -307,6 +332,8 @@
     assert("nopub: no website when empty", noPubManifest.website, undefined);
     assert("nopub: no contactEmail when empty", noPubManifest.contactEmail, undefined);
     assert("nopub: no tags when missing", noPubManifest.tags, undefined);
+    assert("nopub: no changelog when empty", noPubManifest.changelog, undefined);
+    assert("nopub: no icon when empty", noPubManifest.icon, undefined);
     assert("nopub: no memoryLimit when 0", noPubManifest.memoryLimit, undefined);
 
     // ========================================

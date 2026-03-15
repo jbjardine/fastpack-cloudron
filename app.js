@@ -33,6 +33,8 @@ function buildConfig() {
   const configurePathEl = document.getElementById('app-configure-path');
   const upstreamVersionEl = document.getElementById('app-upstream-version');
   const postInstallMessageEl = document.getElementById('app-post-install-message');
+  const changelogEl = document.getElementById('app-changelog');
+  const iconEl = document.getElementById('app-icon');
   const memoryLimitEl = document.getElementById('app-memory-limit');
 
   const image = imageEl.value.trim();
@@ -130,6 +132,8 @@ function buildConfig() {
     configurePath: configurePathEl.value.trim(),
     upstreamVersion: upstreamVersionEl.value.trim(),
     postInstallMessage: postInstallMessageEl.value.trim(),
+    changelog: changelogEl.value.trim(),
+    icon: iconEl.value.trim(),
     memoryLimit,
   };
 }

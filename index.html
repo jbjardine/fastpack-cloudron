@@ -265,6 +265,7 @@
         <select id="sso">
           <option value="">None</option>
           <option value="proxyAuth">ProxyAuth</option>
+          <option value="simpleAuth">SimpleAuth</option>
           <option value="oidc">OIDC</option>
           <option value="ldap">LDAP</option>
         </select>
@@ -324,6 +325,14 @@
         <div class="form-group">
           <label for="app-post-install-message">Post-Install Message</label>
           <textarea id="app-post-install-message" placeholder="Shown after installation (markdown)"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="app-changelog">Changelog</label>
+          <textarea id="app-changelog" placeholder="Version changelog (markdown)"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="app-icon">Icon filename</label>
+          <input type="text" id="app-icon" placeholder="file://icon.png (256x256)">
         </div>
         <div class="form-group">
           <label for="health-check-path">Health Check Path</label>

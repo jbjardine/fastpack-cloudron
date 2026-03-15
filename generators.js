@@ -81,6 +81,12 @@ export function generateManifest(config) {
   if (config.postInstallMessage && config.postInstallMessage.trim() !== "") {
     manifest.postInstallMessage = config.postInstallMessage;
   }
+  if (config.changelog && config.changelog.trim() !== "") {
+    manifest.changelog = config.changelog;
+  }
+  if (config.icon && config.icon.trim() !== "") {
+    manifest.icon = config.icon;
+  }
   if (config.memoryLimit && config.memoryLimit > 0) {
     manifest.memoryLimit = config.memoryLimit;
   }
@@ -101,6 +107,8 @@ export function generateManifest(config) {
   // SSO addons — Fix #7: use lowercase "proxyauth" per Cloudron manifest spec
   if (config.sso === "proxyAuth") {
     addons.proxyauth = {};
+  } else if (config.sso === "simpleAuth") {
+    addons.simpleauth = {};
   } else if (config.sso === "oidc") {
     addons.oidc = {
       loginRedirectUri: config.oidcRedirectUri || "/auth/openid/callback",
