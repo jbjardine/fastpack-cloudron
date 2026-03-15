@@ -283,7 +283,9 @@
     assertIncludes("web: FROM", webDockerfile, "FROM nginx:latest");
     assertIncludes("web: EXPOSE httpPort", webDockerfile, "EXPOSE 8080");
     assertIncludes("web: CMD", webDockerfile, 'CMD ["/app/code/start.sh"]');
-    assertIncludes("web: gosu install", webDockerfile, "apt-get install -y gosu");
+    assertIncludes("web: gosu install step", webDockerfile, "if command -v apt-get");
+    assertIncludes("web: gosu apk fallback", webDockerfile, "apk add --no-cache su-exec");
+    assertIncludes("web: gosu shim fallback", webDockerfile, "creating a passthrough gosu shim");
     assertIncludes("web: mkdir /app/code", webDockerfile, "mkdir -p /app/code");
     assertNotIncludes("web: no mkdir /app/data", webDockerfile, "/app/data");
 
