@@ -28,6 +28,7 @@
       generateManifest,
       generateDockerfile,
       generateStartSh,
+      generateDescription,
       generateDockerignore,
       generateReadme,
     } from "./generators.js";
@@ -182,6 +183,7 @@
     assert("full: tcpPorts present", fullManifest.tcpPorts.MQTT_PORT.containerPort, 1883);
     assert("full: sendmail addon", JSON.stringify(fullManifest.addons.sendmail), "{}");
     assert("full: tagline present", fullManifest.tagline, "A short tagline");
+    assert("full: description uses file://", fullManifest.description, "file://DESCRIPTION.md");
 
     // OIDC with custom redirect URI
     const oidcCustomConfig = {
@@ -266,6 +268,47 @@
     const udpManifest = JSON.parse(generateManifest(udpConfig));
     assert("udp: udpPorts present", udpManifest.udpPorts.DNS_PORT.containerPort, 53);
 
+    // Publishing fields
+    const publishConfig = {
+      id: "com.example.pub",
+      title: "Pub App",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: null,
+      sso: null,
+      addons: [],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+      website: "https://example.com",
+      contactEmail: "test@example.com",
+      tags: ["blog", "wiki"],
+      configurePath: "/admin",
+      upstreamVersion: "3.2.1",
+      postInstallMessage: "Welcome!",
+      memoryLimit: 536870912,
+    };
+    const pubManifest = JSON.parse(generateManifest(publishConfig));
+    assert("pub: website", pubManifest.website, "https://example.com");
+    assert("pub: contactEmail", pubManifest.contactEmail, "test@example.com");
+    assert("pub: tags count", pubManifest.tags.length, 2);
+    assert("pub: tags[0]", pubManifest.tags[0], "blog");
+    assert("pub: configurePath", pubManifest.configurePath, "/admin");
+    assert("pub: upstreamVersion", pubManifest.upstreamVersion, "3.2.1");
+    assert("pub: postInstallMessage", pubManifest.postInstallMessage, "Welcome!");
+    assert("pub: memoryLimit", pubManifest.memoryLimit, 536870912);
+
+    // No publishing fields when empty
+    const noPubManifest = JSON.parse(generateManifest(basicConfig));
+    assert("nopub: no website when empty", noPubManifest.website, undefined);
+    assert("nopub: no contactEmail when empty", noPubManifest.contactEmail, undefined);
+    assert("nopub: no tags when missing", noPubManifest.tags, undefined);
+    assert("nopub: no memoryLimit when 0", noPubManifest.memoryLimit, undefined);
+
     // ========================================
     // generateDockerfile
     // ========================================
@@ -285,11 +328,12 @@
     assertIncludes("web: CMD", webDockerfile, 'CMD ["/app/code/start.sh"]');
     assertIncludes("web: gosu install step", webDockerfile, "if command -v apt-get");
     assertIncludes("web: gosu apk fallback", webDockerfile, "apk add --no-cache su-exec");
-    assertIncludes("web: gosu shim fallback", webDockerfile, "creating a passthrough gosu shim");
+    assertIncludes("web: gosu shim uses su", webDockerfile, "exec su -s /bin/sh");
     assertIncludes("web: mkdir /app/code", webDockerfile, "mkdir -p /app/code");
     assertNotIncludes("web: no mkdir /app/data", webDockerfile, "/app/data");
+    assertNotIncludes("web: no python3 install for web mode", webDockerfile, "Install python3");
 
-    // TCP mode — ports always exposed
+    // TCP mode — ports always exposed + python3 installed
     const tcpDockerConfig = {
       image: "eclipse-mosquitto:2.0",
       httpPort: 8080,
@@ -299,6 +343,7 @@
     };
     const tcpDockerfile = generateDockerfile(tcpDockerConfig);
     assertIncludes("tcp: EXPOSE includes tcp port", tcpDockerfile, "1883");
+    assertIncludes("tcp: python3 install for TCP mode", tcpDockerfile, "Install python3");
 
     // Web mode with extra ports — ports always exposed now
     const webWithPortsConfig = {
@@ -332,6 +377,7 @@
       httpPort: 8080,
       hasWebUI: true,
       addons: ["localstorage"],
+      version: "1.0.0",
     };
     const webStart = generateStartSh(webStartConfig);
     assertIncludes("web: shebang", webStart, "#!/bin/sh");
@@ -339,12 +385,14 @@
     assertNotIncludes("web: no python", webStart, "python");
     assertIncludes("web: chown with localstorage", webStart, "chown");
     assertIncludes("web: initialized guard", webStart, ".initialized");
+    assertIncludes("web: version stored in .initialized", webStart, '"1.0.0"');
 
     // TCP mode without localstorage
     const tcpStartConfig = {
       httpPort: 8080,
       hasWebUI: false,
       addons: [],
+      version: "1.0.0",
     };
     const tcpStart = generateStartSh(tcpStartConfig);
     assertIncludes("tcp: python healthcheck", tcpStart, "python");
@@ -360,11 +408,21 @@
       httpPort: 9090,
       hasWebUI: false,
       addons: ["localstorage"],
+      version: "2.0.0",
     };
     const tcpStorageStart = generateStartSh(tcpStorageConfig);
     assertIncludes("tcp+storage: python healthcheck", tcpStorageStart, "python");
     assertIncludes("tcp+storage: chown", tcpStorageStart, "chown");
     assertIncludes("tcp+storage: wait", tcpStorageStart, "wait");
+
+    // ========================================
+    // generateDescription
+    // ========================================
+    addSuite("generateDescription");
+
+    assert("returns null when no description", generateDescription({ description: "" }), null);
+    assert("returns null when whitespace only", generateDescription({ description: "   " }), null);
+    assert("returns content with newline", generateDescription({ description: "My app description" }), "My app description\n");
 
     // ========================================
     // generateDockerignore
@@ -383,6 +441,7 @@
     const readmeConfig = {
       id: "com.example.test",
       title: "Test App",
+      hasWebUI: true,
     };
     const readme = generateReadme(readmeConfig);
     assertIncludes("has title", readme, "# Test App");
@@ -391,6 +450,17 @@
     assertNotIncludes("no --image in install command", readme, "cloudron install --image");
     assertIncludes("non-root caveat", readme, "non-root");
     assertIncludes("logging guidance", readme, "stdout/stderr");
+    assertNotIncludes("web: no TCP-only note", readme, "TCP-only mode");
+
+    // TCP mode README
+    const tcpReadmeConfig = {
+      id: "com.example.tcp",
+      title: "TCP App",
+      hasWebUI: false,
+    };
+    const tcpReadme = generateReadme(tcpReadmeConfig);
+    assertIncludes("tcp: has TCP-only note", tcpReadme, "TCP-only mode");
+    assertIncludes("tcp: mentions health-check", tcpReadme, "health-check");
 
     // ========================================
     // Summary

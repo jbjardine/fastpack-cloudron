@@ -6,6 +6,7 @@ import {
   generateManifest,
   generateDockerfile,
   generateStartSh,
+  generateDescription,
   generateDockerignore,
   generateReadme,
 } from './generators.js';
@@ -27,6 +28,12 @@ function buildConfig() {
   const taglineEl = document.getElementById('app-tagline');
   const descriptionEl = document.getElementById('app-description');
   const oidcRedirectUriEl = document.getElementById('oidc-redirect-uri');
+  const websiteEl = document.getElementById('app-website');
+  const contactEmailEl = document.getElementById('app-contact-email');
+  const configurePathEl = document.getElementById('app-configure-path');
+  const upstreamVersionEl = document.getElementById('app-upstream-version');
+  const postInstallMessageEl = document.getElementById('app-post-install-message');
+  const memoryLimitEl = document.getElementById('app-memory-limit');
 
   const image = imageEl.value.trim();
 
@@ -89,6 +96,17 @@ function buildConfig() {
     });
   }
 
+  // Collect selected tags
+  const tags = [];
+  const tagCheckboxes = document.querySelectorAll('.tag-checkbox:checked');
+  for (const cb of tagCheckboxes) {
+    tags.push(cb.value);
+  }
+
+  // Parse memoryLimit (MB -> bytes)
+  const memoryLimitMB = parseInt(memoryLimitEl.value, 10) || 0;
+  const memoryLimit = memoryLimitMB > 0 ? memoryLimitMB * 1024 * 1024 : 0;
+
   return {
     image,
     id,
@@ -106,6 +124,13 @@ function buildConfig() {
     tagline: taglineEl.value.trim(),
     description: descriptionEl.value.trim(),
     oidcRedirectUri: oidcRedirectUriEl.value.trim() || '/auth/openid/callback',
+    website: websiteEl.value.trim(),
+    contactEmail: contactEmailEl.value.trim(),
+    tags,
+    configurePath: configurePathEl.value.trim(),
+    upstreamVersion: upstreamVersionEl.value.trim(),
+    postInstallMessage: postInstallMessageEl.value.trim(),
+    memoryLimit,
   };
 }
 
@@ -147,6 +172,18 @@ function validate(config) {
       field: 'health-check-path',
       message: 'Must start with /',
     });
+  }
+
+  // Validate port names (must be valid env var identifiers)
+  const allPorts = [...config.tcpPorts, ...config.udpPorts];
+  for (const port of allPorts) {
+    if (port.name && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(port.name)) {
+      errors.push({
+        field: 'ports',
+        message: `Invalid port name "${port.name}": use letters, digits, underscores (no leading digit)`,
+      });
+      break;
+    }
   }
 
   // Port conflicts — TCP and UDP are separate namespaces
@@ -198,10 +235,20 @@ function validate(config) {
   return { errors, warnings };
 }
 
+let _debounceTimer = null;
+
+/**
+ * Debounced wrapper around updatePreviewNow.
+ */
+function updatePreview() {
+  clearTimeout(_debounceTimer);
+  _debounceTimer = setTimeout(updatePreviewNow, 150);
+}
+
 /**
  * Rebuilds the preview panes and shows validation messages.
  */
-function updatePreview() {
+function updatePreviewNow() {
   const config = buildConfig();
   const result = validate(config);
 
@@ -262,6 +309,23 @@ function updatePreview() {
 }
 
 /**
+ * Copies text content of a preview pane to clipboard.
+ */
+function copyPreview(panelId) {
+  const el = document.getElementById(panelId);
+  if (!el) return;
+  navigator.clipboard.writeText(el.textContent).then(function () {
+    // Flash the copy button
+    const btn = document.querySelector(`.copy-btn[data-copy="${panelId}"]`);
+    if (btn) {
+      const original = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(function () { btn.textContent = original; }, 1200);
+    }
+  });
+}
+
+/**
  * Validates, builds the ZIP, and triggers download.
  */
 async function downloadZip() {
@@ -289,6 +353,12 @@ async function downloadZip() {
   zip.file('start.sh', generateStartSh(config));
   zip.file('.dockerignore', generateDockerignore());
   zip.file('README.md', generateReadme(config));
+
+  // Add DESCRIPTION.md if description is provided
+  const descContent = generateDescription(config);
+  if (descContent) {
+    zip.file('DESCRIPTION.md', descContent);
+  }
 
   const blob = await zip.generateAsync({ type: 'blob' });
   const filename = `${sanitizeImageName(config.image) || 'cloudron-app'}-cloudron.zip`;
@@ -329,11 +399,11 @@ function addPortRow(type) {
   removeBtn.className = 'remove-port';
   removeBtn.textContent = '\u2715'; // Unicode cross mark (10005 decimal)
 
-  // Wire blur events for live preview
-  nameInput.addEventListener('blur', updatePreview);
-  titleInput.addEventListener('blur', updatePreview);
-  containerInput.addEventListener('blur', updatePreview);
-  defaultInput.addEventListener('blur', updatePreview);
+  // Wire input events for live preview (with debounce)
+  nameInput.addEventListener('input', updatePreview);
+  titleInput.addEventListener('input', updatePreview);
+  containerInput.addEventListener('input', updatePreview);
+  defaultInput.addEventListener('input', updatePreview);
 
   // Remove button
   removeBtn.addEventListener('click', function () {
@@ -361,12 +431,12 @@ function markUserEdited(e) {
  * Wire everything up once the DOM is ready.
  */
 document.addEventListener('DOMContentLoaded', function () {
-  // blur on text/number inputs -> updatePreview
+  // input on text/number inputs -> updatePreview (debounced)
   const textAndNumberInputs = document.querySelectorAll(
     'input[type="text"], input[type="number"], textarea'
   );
   for (const input of textAndNumberInputs) {
-    input.addEventListener('blur', updatePreview);
+    input.addEventListener('input', updatePreview);
   }
 
   // change on selects -> updatePreview
@@ -402,8 +472,26 @@ document.addEventListener('DOMContentLoaded', function () {
   // Download button
   document.getElementById('download-btn').addEventListener('click', downloadZip);
 
+  // Copy buttons
+  const copyBtns = document.querySelectorAll('.copy-btn');
+  for (const btn of copyBtns) {
+    btn.addEventListener('click', function () {
+      copyPreview(btn.dataset.copy);
+    });
+  }
+
+  // Map tab targets to preview element IDs
+  const tabToCopyId = {
+    manifest: 'preview-manifest',
+    dockerfile: 'preview-dockerfile',
+    startsh: 'preview-startsh',
+    dockerignore: 'preview-dockerignore',
+    readme: 'preview-readme',
+  };
+
   // Preview tab switching
   const tabs = document.querySelectorAll('.preview-tab');
+  const copyBtn = document.querySelector('.copy-btn');
   for (const tab of tabs) {
     tab.addEventListener('click', function () {
       // Remove active from all tabs
@@ -422,6 +510,12 @@ document.addEventListener('DOMContentLoaded', function () {
         } else {
           panel.classList.remove('active');
         }
+      }
+
+      // Update copy button target
+      if (copyBtn && tabToCopyId[target]) {
+        copyBtn.dataset.copy = tabToCopyId[target];
+        copyBtn.textContent = 'Copy';
       }
     });
   }

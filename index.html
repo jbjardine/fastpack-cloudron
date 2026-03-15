@@ -88,6 +88,23 @@
       gap: 1rem;
     }
 
+    .checkbox-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1.5rem;
+    }
+
+    .checkbox-grid label {
+      font-weight: normal;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    .checkbox-grid input[type="checkbox"] {
+      width: auto;
+    }
+
     #download-btn {
       background: var(--primary);
       color: white;
@@ -132,11 +149,18 @@
       padding: 0.25rem;
     }
 
-    .preview-tabs {
+    .preview-header {
       display: flex;
+      align-items: center;
       gap: 0;
       border-bottom: 2px solid var(--border);
       margin-bottom: 0;
+    }
+
+    .preview-tabs {
+      display: flex;
+      gap: 0;
+      flex: 1;
     }
 
     .preview-tab {
@@ -153,6 +177,21 @@
       border-bottom-color: var(--primary);
       color: var(--primary);
       font-weight: 600;
+    }
+
+    .copy-btn {
+      padding: 0.3rem 0.7rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--card-bg);
+      cursor: pointer;
+      font-size: 0.8rem;
+      margin-left: auto;
+      white-space: nowrap;
+    }
+
+    .copy-btn:hover {
+      background: var(--bg);
     }
 
     .preview-content {
@@ -255,6 +294,10 @@
           <input type="text" id="app-version" value="1.0.0">
         </div>
         <div class="form-group">
+          <label for="app-upstream-version">Upstream Version</label>
+          <input type="text" id="app-upstream-version" placeholder="e.g., 2.0.18">
+        </div>
+        <div class="form-group">
           <label for="app-author">Author</label>
           <input type="text" id="app-author" placeholder="Your Name">
         </div>
@@ -264,7 +307,23 @@
         </div>
         <div class="form-group">
           <label for="app-description">Description</label>
-          <textarea id="app-description" placeholder="App description (markdown)"></textarea>
+          <textarea id="app-description" placeholder="App description (markdown) — saved as DESCRIPTION.md"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="app-website">Website</label>
+          <input type="text" id="app-website" placeholder="https://example.com">
+        </div>
+        <div class="form-group">
+          <label for="app-contact-email">Contact Email</label>
+          <input type="text" id="app-contact-email" placeholder="support@example.com">
+        </div>
+        <div class="form-group">
+          <label for="app-configure-path">Configure Path</label>
+          <input type="text" id="app-configure-path" placeholder="/admin">
+        </div>
+        <div class="form-group">
+          <label for="app-post-install-message">Post-Install Message</label>
+          <textarea id="app-post-install-message" placeholder="Shown after installation (markdown)"></textarea>
         </div>
         <div class="form-group">
           <label for="health-check-path">Health Check Path</label>
@@ -276,22 +335,44 @@
           <input type="number" id="http-port" value="8000">
           <span class="field-error" data-error-for="http-port"></span>
         </div>
+        <div class="form-group">
+          <label for="app-memory-limit">Memory Limit (MB)</label>
+          <input type="number" id="app-memory-limit" placeholder="256 (default)">
+        </div>
         <div class="form-group" id="oidc-redirect-group" style="display: none;">
           <label for="oidc-redirect-uri">OIDC Login Redirect URI</label>
           <input type="text" id="oidc-redirect-uri" value="/auth/openid/callback">
+        </div>
+        <div class="form-group">
+          <label>Tags</label>
+          <div class="checkbox-grid">
+            <label><input type="checkbox" class="tag-checkbox" value="blog"> blog</label>
+            <label><input type="checkbox" class="tag-checkbox" value="chat"> chat</label>
+            <label><input type="checkbox" class="tag-checkbox" value="git"> git</label>
+            <label><input type="checkbox" class="tag-checkbox" value="email"> email</label>
+            <label><input type="checkbox" class="tag-checkbox" value="sync"> sync</label>
+            <label><input type="checkbox" class="tag-checkbox" value="gallery"> gallery</label>
+            <label><input type="checkbox" class="tag-checkbox" value="notes"> notes</label>
+            <label><input type="checkbox" class="tag-checkbox" value="project"> project</label>
+            <label><input type="checkbox" class="tag-checkbox" value="hosting"> hosting</label>
+            <label><input type="checkbox" class="tag-checkbox" value="wiki"> wiki</label>
+          </div>
         </div>
       </details>
 
       <details>
         <summary>Customize addons</summary>
         <div class="form-group">
-          <label><input type="checkbox" class="addon-checkbox" value="localstorage" checked> localstorage</label>
-          <label><input type="checkbox" class="addon-checkbox" value="sendmail"> sendmail</label>
-          <label><input type="checkbox" class="addon-checkbox" value="recvmail"> recvmail</label>
-          <label><input type="checkbox" class="addon-checkbox" value="scheduler"> scheduler</label>
-          <label><input type="checkbox" class="addon-checkbox" value="tls"> TLS</label>
-          <label><input type="checkbox" class="addon-checkbox" value="turn"> TURN</label>
-          <label><input type="checkbox" class="addon-checkbox" value="docker"> Docker</label>
+          <div class="checkbox-grid">
+            <label><input type="checkbox" class="addon-checkbox" value="localstorage" checked> localstorage</label>
+            <label><input type="checkbox" class="addon-checkbox" value="sendmail"> sendmail</label>
+            <label><input type="checkbox" class="addon-checkbox" value="recvmail"> recvmail</label>
+            <label><input type="checkbox" class="addon-checkbox" value="email"> email (full)</label>
+            <label><input type="checkbox" class="addon-checkbox" value="scheduler"> scheduler</label>
+            <label><input type="checkbox" class="addon-checkbox" value="tls"> TLS</label>
+            <label><input type="checkbox" class="addon-checkbox" value="turn"> TURN</label>
+            <label><input type="checkbox" class="addon-checkbox" value="docker"> Docker</label>
+          </div>
         </div>
       </details>
 
@@ -315,12 +396,15 @@
     </main>
 
     <section>
-      <div class="preview-tabs">
-        <button class="preview-tab active" data-target="manifest">manifest</button>
-        <button class="preview-tab" data-target="dockerfile">dockerfile</button>
-        <button class="preview-tab" data-target="startsh">startsh</button>
-        <button class="preview-tab" data-target="dockerignore">dockerignore</button>
-        <button class="preview-tab" data-target="readme">readme</button>
+      <div class="preview-header">
+        <div class="preview-tabs">
+          <button class="preview-tab active" data-target="manifest">manifest</button>
+          <button class="preview-tab" data-target="dockerfile">dockerfile</button>
+          <button class="preview-tab" data-target="startsh">startsh</button>
+          <button class="preview-tab" data-target="dockerignore">dockerignore</button>
+          <button class="preview-tab" data-target="readme">readme</button>
+        </div>
+        <button class="copy-btn" data-copy="preview-manifest">Copy</button>
       </div>
       <div class="preview-content active" data-panel="manifest"><pre><code id="preview-manifest"></code></pre></div>
       <div class="preview-content" data-panel="dockerfile"><pre><code id="preview-dockerfile"></code></pre></div>
