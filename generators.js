@@ -59,7 +59,36 @@ export function generateManifest(config) {
     manifest.author = config.author;
   }
   if (config.description && config.description.trim() !== "") {
-    manifest.description = config.description;
+    manifest.description = "file://DESCRIPTION.md";
+  }
+
+  // Publishing fields
+  if (config.website && config.website.trim() !== "") {
+    manifest.website = config.website;
+  }
+  if (config.contactEmail && config.contactEmail.trim() !== "") {
+    manifest.contactEmail = config.contactEmail;
+  }
+  if (config.tags && config.tags.length > 0) {
+    manifest.tags = config.tags;
+  }
+  if (config.configurePath && config.configurePath.trim() !== "") {
+    manifest.configurePath = config.configurePath;
+  }
+  if (config.upstreamVersion && config.upstreamVersion.trim() !== "") {
+    manifest.upstreamVersion = config.upstreamVersion;
+  }
+  if (config.postInstallMessage && config.postInstallMessage.trim() !== "") {
+    manifest.postInstallMessage = config.postInstallMessage;
+  }
+  if (config.changelog && config.changelog.trim() !== "") {
+    manifest.changelog = config.changelog;
+  }
+  if (config.icon && config.icon.trim() !== "") {
+    manifest.icon = config.icon;
+  }
+  if (config.memoryLimit && config.memoryLimit > 0) {
+    manifest.memoryLimit = config.memoryLimit;
   }
 
   // SSO at root level: optionalSso when sso is null or "none"
@@ -78,6 +107,8 @@ export function generateManifest(config) {
   // SSO addons — Fix #7: use lowercase "proxyauth" per Cloudron manifest spec
   if (config.sso === "proxyAuth") {
     addons.proxyauth = {};
+  } else if (config.sso === "simpleAuth") {
+    addons.simpleauth = {};
   } else if (config.sso === "oidc") {
     addons.oidc = {
       loginRedirectUri: config.oidcRedirectUri || "/auth/openid/callback",
@@ -146,15 +177,29 @@ export function generateDockerfile(config) {
       apk add --no-cache su-exec; \\
       ln -sf /sbin/su-exec /usr/local/bin/gosu; \\
     else \\
-      echo \"No supported package manager found; creating a passthrough gosu shim\"; \\
+      echo \"No supported package manager found; creating a gosu shim using su\"; \\
       mkdir -p /usr/local/bin; \\
-      printf '#!/bin/sh\\nshift\\nexec \"$@\"\\n' > /usr/local/bin/gosu; \\
+      printf '#!/bin/sh\\nUSER=$1; shift\\nexec su -s /bin/sh \"$USER\" -c \"exec $*\"\\n' > /usr/local/bin/gosu; \\
       chmod +x /usr/local/bin/gosu; \\
     fi`);
   lines.push("");
   lines.push("COPY start.sh /app/code/start.sh");
   lines.push("RUN chmod +x /app/code/start.sh");
   lines.push("");
+
+  // Install python3 for the health-check server when no web UI
+  if (!config.hasWebUI) {
+    lines.push("# Install python3 for health-check endpoint (TCP-only mode)");
+    lines.push(`RUN set -eux; \\
+    if command -v apt-get >/dev/null 2>&1; then \\
+      apt-get update; \\
+      apt-get install -y --no-install-recommends python3; \\
+      rm -rf /var/lib/apt/lists/*; \\
+    elif command -v apk >/dev/null 2>&1; then \\
+      apk add --no-cache python3; \\
+    fi`);
+    lines.push("");
+  }
 
   // EXPOSE: always httpPort
   const exposePorts = [String(config.httpPort)];
@@ -197,7 +242,7 @@ export function generateStartSh(config) {
   if (hasLocalstorage) {
     lines.push("if [ ! -f /app/data/.initialized ]; then");
     lines.push("    echo \"Initializing data directory...\"");
-    lines.push("    touch /app/data/.initialized");
+    lines.push(`    echo "${config.version}" > /app/data/.initialized`);
     lines.push("fi");
     lines.push("");
     lines.push("chown -R cloudron:cloudron /app/data");
@@ -235,6 +280,17 @@ http.server.HTTPServer(('0.0.0.0', ${config.httpPort}), H).serve_forever()
   }
 
   return lines.join("\n") + "\n";
+}
+
+/**
+ * Generates DESCRIPTION.md content (referenced by manifest via file://).
+ * Returns null when no description is set.
+ */
+export function generateDescription(config) {
+  if (!config.description || config.description.trim() === "") {
+    return null;
+  }
+  return config.description.trim() + "\n";
 }
 
 /**
@@ -277,6 +333,11 @@ export function generateReadme(config) {
   lines.push(
     "- Ensure your application logs to stdout/stderr for proper Cloudron log integration."
   );
+  if (!config.hasWebUI) {
+    lines.push(
+      "- This package runs in TCP-only mode. A minimal Python health-check server listens on the HTTP port so Cloudron can verify the app is running."
+    );
+  }
 
   return lines.join("\n") + "\n";
 }
