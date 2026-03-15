@@ -9,6 +9,7 @@ import {
   generateDescription,
   generateDockerignore,
   generateReadme,
+  generateCloudronVersions,
 } from './generators.js';
 
 /**
@@ -28,6 +29,8 @@ function buildConfig() {
   const taglineEl = document.getElementById('app-tagline');
   const descriptionEl = document.getElementById('app-description');
   const oidcRedirectUriEl = document.getElementById('oidc-redirect-uri');
+  const oidcLogoutUriEl = document.getElementById('oidc-logout-uri');
+  const oidcTokenAlgoEl = document.getElementById('oidc-token-algo');
   const websiteEl = document.getElementById('app-website');
   const contactEmailEl = document.getElementById('app-contact-email');
   const configurePathEl = document.getElementById('app-configure-path');
@@ -36,6 +39,38 @@ function buildConfig() {
   const changelogEl = document.getElementById('app-changelog');
   const iconEl = document.getElementById('app-icon');
   const memoryLimitEl = document.getElementById('app-memory-limit');
+
+  // Publishing fields
+  const packagerNameEl = document.getElementById('packager-name');
+  const packagerUrlEl = document.getElementById('packager-url');
+  const iconUrlEl = document.getElementById('icon-url');
+  const mediaLinksEl = document.getElementById('media-links');
+  const documentationUrlEl = document.getElementById('documentation-url');
+  const forumUrlEl = document.getElementById('forum-url');
+
+  // Advanced fields
+  const minBoxVersionEl = document.getElementById('min-box-version');
+  const multiDomainEl = document.getElementById('multi-domain');
+  const runtimeDirsEl = document.getElementById('runtime-dirs');
+  const persistentDirsEl = document.getElementById('persistent-dirs');
+  const backupCommandEl = document.getElementById('backup-command');
+  const restoreCommandEl = document.getElementById('restore-command');
+
+  // ProxyAuth options
+  const proxyauthPathEl = document.getElementById('proxyauth-path');
+  const proxyauthBasicAuthEl = document.getElementById('proxyauth-basic-auth');
+  const proxyauthBearerAuthEl = document.getElementById('proxyauth-bearer-auth');
+
+  // Database-specific options
+  const mysqlMultipleDbsEl = document.getElementById('mysql-multiple-dbs');
+  const mongodbOplogEl = document.getElementById('mongodb-oplog');
+  const redisNoPasswordEl = document.getElementById('redis-no-password');
+  const postgresqlLocaleEl = document.getElementById('postgresql-locale');
+
+  // Sendmail options
+  const sendmailOptionalEl = document.getElementById('sendmail-optional');
+  const sendmailDisplayNameEl = document.getElementById('sendmail-display-name');
+  const sendmailValidCertEl = document.getElementById('sendmail-valid-cert');
 
   const image = imageEl.value.trim();
 
@@ -105,9 +140,30 @@ function buildConfig() {
     tags.push(cb.value);
   }
 
+  // Collect capabilities
+  const capabilities = [];
+  const capCheckboxes = document.querySelectorAll('.capability-checkbox:checked');
+  for (const cb of capCheckboxes) {
+    capabilities.push(cb.value);
+  }
+
+  // Collect scheduler task rows
+  const schedulerTasks = [];
+  const taskRows = document.querySelectorAll('.scheduler-task-row');
+  for (const row of taskRows) {
+    schedulerTasks.push({
+      name: row.querySelector('.task-name').value.trim(),
+      schedule: row.querySelector('.task-schedule').value.trim(),
+      command: row.querySelector('.task-command').value.trim(),
+    });
+  }
+
   // Parse memoryLimit (MB -> bytes)
   const memoryLimitMB = parseInt(memoryLimitEl.value, 10) || 0;
   const memoryLimit = memoryLimitMB > 0 ? memoryLimitMB * 1024 * 1024 : 0;
+
+  // Parse comma-separated directory lists
+  const parseDirs = (el) => el.value.trim().split(',').map(s => s.trim()).filter(s => s.length > 0);
 
   return {
     image,
@@ -126,6 +182,8 @@ function buildConfig() {
     tagline: taglineEl.value.trim(),
     description: descriptionEl.value.trim(),
     oidcRedirectUri: oidcRedirectUriEl.value.trim() || '/auth/openid/callback',
+    oidcLogoutUri: oidcLogoutUriEl.value.trim() || '/',
+    oidcTokenAlgo: oidcTokenAlgoEl.value || '',
     website: websiteEl.value.trim(),
     contactEmail: contactEmailEl.value.trim(),
     tags,
@@ -135,7 +193,44 @@ function buildConfig() {
     changelog: changelogEl.value.trim(),
     icon: iconEl.value.trim(),
     memoryLimit,
+    // Publishing
+    packagerName: packagerNameEl.value.trim(),
+    packagerUrl: packagerUrlEl.value.trim(),
+    iconUrl: iconUrlEl.value.trim(),
+    mediaLinks: mediaLinksEl.value.trim().split('\n').map(s => s.trim()).filter(s => s.length > 0),
+    documentationUrl: documentationUrlEl.value.trim(),
+    forumUrl: forumUrlEl.value.trim(),
+    // Advanced
+    minBoxVersion: minBoxVersionEl.value.trim(),
+    capabilities,
+    multiDomain: multiDomainEl.checked,
+    runtimeDirs: parseDirs(runtimeDirsEl),
+    persistentDirs: parseDirs(persistentDirsEl),
+    backupCommand: backupCommandEl.value.trim(),
+    restoreCommand: restoreCommandEl.value.trim(),
+    // ProxyAuth options
+    proxyauthPath: proxyauthPathEl.value.trim(),
+    proxyauthBasicAuth: proxyauthBasicAuthEl.checked,
+    proxyauthBearerAuth: proxyauthBearerAuthEl.checked,
+    // Database-specific options
+    mysqlMultipleDbs: mysqlMultipleDbsEl.checked,
+    mongodbOplog: mongodbOplogEl.checked,
+    redisNoPassword: redisNoPasswordEl.checked,
+    postgresqlLocale: postgresqlLocaleEl.value.trim(),
+    // Sendmail options
+    sendmailOptional: sendmailOptionalEl.checked,
+    sendmailDisplayName: sendmailDisplayNameEl.checked,
+    sendmailValidCert: sendmailValidCertEl.checked,
+    // Scheduler tasks
+    schedulerTasks,
   };
+}
+
+/**
+ * Toggles visibility of an element by ID based on a condition.
+ */
+function toggleVisibility(elementId, visible) {
+  document.getElementById(elementId).style.display = visible ? '' : 'none';
 }
 
 /**
@@ -217,6 +312,41 @@ function validate(config) {
     });
   }
 
+  // Validate scheduler task names
+  for (const task of config.schedulerTasks) {
+    if (task.name && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(task.name)) {
+      errors.push({
+        field: 'scheduler',
+        message: `Invalid task name "${task.name}": use letters, digits, underscores`,
+      });
+      break;
+    }
+  }
+
+  // Validate URLs (warning if not https://)
+  const urlFields = [
+    { value: config.packagerUrl, label: 'Packager URL' },
+    { value: config.iconUrl, label: 'Icon URL' },
+    { value: config.documentationUrl, label: 'Documentation URL' },
+    { value: config.forumUrl, label: 'Forum URL' },
+  ];
+  for (const f of urlFields) {
+    if (f.value && !f.value.startsWith('https://')) {
+      warnings.push({ message: `${f.label} should use https://` });
+    }
+  }
+  for (const link of config.mediaLinks) {
+    if (link && !link.startsWith('https://')) {
+      warnings.push({ message: 'Media links should use https://' });
+      break;
+    }
+  }
+
+  // Validate minBoxVersion format
+  if (config.minBoxVersion && !/^\d+\.\d+\.\d+$/.test(config.minBoxVersion)) {
+    warnings.push({ message: 'Minimum Cloudron version should be semver (e.g., 7.0.0)' });
+  }
+
   // Warning: TCP mode (no web UI) with no ports
   if (
     !config.hasWebUI &&
@@ -233,6 +363,13 @@ function validate(config) {
     warnings.push({
       message:
         'Without localstorage, your app cannot persist data. Are you sure?',
+    });
+  }
+
+  // Warning: capabilities selected
+  if (config.capabilities.length > 0) {
+    warnings.push({
+      message: 'Capabilities grant elevated privileges. Only use if your app requires them.',
     });
   }
 
@@ -291,14 +428,27 @@ function updatePreviewNow() {
     generateDockerignore();
   document.getElementById('preview-readme').textContent =
     generateReadme(config);
+  document.getElementById('preview-versions').textContent =
+    generateCloudronVersions(config);
 
   // Show/hide HTTP port group based on web UI selection
-  const httpPortGroup = document.getElementById('http-port-group');
-  httpPortGroup.style.display = config.hasWebUI ? '' : 'none';
+  toggleVisibility('http-port-group', config.hasWebUI);
 
-  // Show/hide OIDC redirect URI field based on SSO selection
-  const oidcGroup = document.getElementById('oidc-redirect-group');
-  oidcGroup.style.display = config.sso === 'oidc' ? '' : 'none';
+  // Show/hide SSO-specific options
+  toggleVisibility('oidc-redirect-group', config.sso === 'oidc');
+  toggleVisibility('oidc-logout-group', config.sso === 'oidc');
+  toggleVisibility('oidc-token-algo-group', config.sso === 'oidc');
+  toggleVisibility('proxyauth-options-group', config.sso === 'proxyAuth');
+
+  // Show/hide database-specific options
+  toggleVisibility('mysql-options-group', config.database === 'mysql');
+  toggleVisibility('mongodb-options-group', config.database === 'mongodb');
+  toggleVisibility('redis-options-group', config.database === 'redis');
+  toggleVisibility('postgresql-options-group', config.database === 'postgresql');
+
+  // Show/hide addon-specific options
+  toggleVisibility('sendmail-options-group', config.addons.includes('sendmail'));
+  toggleVisibility('scheduler-options-group', config.addons.includes('scheduler'));
 
   // Update auto-generated fields if not user-edited
   const idEl = document.getElementById('app-id');
@@ -357,6 +507,7 @@ async function downloadZip() {
   zip.file('start.sh', generateStartSh(config));
   zip.file('.dockerignore', generateDockerignore());
   zip.file('README.md', generateReadme(config));
+  zip.file('CloudronVersions.json', generateCloudronVersions(config));
 
   // Add DESCRIPTION.md if description is provided
   const descContent = generateDescription(config);
@@ -401,7 +552,7 @@ function addPortRow(type) {
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button';
   removeBtn.className = 'remove-port';
-  removeBtn.textContent = '\u2715'; // Unicode cross mark (10005 decimal)
+  removeBtn.textContent = '\u2715';
 
   // Wire input events for live preview (with debounce)
   nameInput.addEventListener('input', updatePreview);
@@ -419,6 +570,52 @@ function addPortRow(type) {
   row.appendChild(titleInput);
   row.appendChild(containerInput);
   row.appendChild(defaultInput);
+  row.appendChild(removeBtn);
+
+  container.appendChild(row);
+}
+
+/**
+ * Adds a scheduler task row to the scheduler tasks container.
+ */
+function addSchedulerTaskRow() {
+  const container = document.getElementById('scheduler-tasks-list');
+
+  const row = document.createElement('div');
+  row.className = 'scheduler-task-row port-row';
+
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'task-name';
+  nameInput.placeholder = 'Task name';
+
+  const scheduleInput = document.createElement('input');
+  scheduleInput.type = 'text';
+  scheduleInput.className = 'task-schedule';
+  scheduleInput.placeholder = '*/5 * * * *';
+
+  const commandInput = document.createElement('input');
+  commandInput.type = 'text';
+  commandInput.className = 'task-command';
+  commandInput.placeholder = '/app/code/task.sh';
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'remove-port';
+  removeBtn.textContent = '\u2715';
+
+  nameInput.addEventListener('input', updatePreview);
+  scheduleInput.addEventListener('input', updatePreview);
+  commandInput.addEventListener('input', updatePreview);
+
+  removeBtn.addEventListener('click', function () {
+    row.remove();
+    updatePreview();
+  });
+
+  row.appendChild(nameInput);
+  row.appendChild(scheduleInput);
+  row.appendChild(commandInput);
   row.appendChild(removeBtn);
 
   container.appendChild(row);
@@ -473,6 +670,11 @@ document.addEventListener('DOMContentLoaded', function () {
     addPortRow('udp');
   });
 
+  // Add scheduler task button
+  document.getElementById('add-scheduler-task').addEventListener('click', function () {
+    addSchedulerTaskRow();
+  });
+
   // Download button
   document.getElementById('download-btn').addEventListener('click', downloadZip);
 
@@ -491,6 +693,7 @@ document.addEventListener('DOMContentLoaded', function () {
     startsh: 'preview-startsh',
     dockerignore: 'preview-dockerignore',
     readme: 'preview-readme',
+    versions: 'preview-versions',
   };
 
   // Preview tab switching

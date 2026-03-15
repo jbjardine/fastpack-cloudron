@@ -260,15 +260,47 @@
         </select>
       </div>
 
+      <div id="mysql-options-group" style="display: none;">
+        <div class="checkbox-grid">
+          <label><input type="checkbox" id="mysql-multiple-dbs"> Multiple databases</label>
+        </div>
+      </div>
+      <div id="mongodb-options-group" style="display: none;">
+        <div class="checkbox-grid">
+          <label><input type="checkbox" id="mongodb-oplog"> Oplog access</label>
+        </div>
+      </div>
+      <div id="redis-options-group" style="display: none;">
+        <div class="checkbox-grid">
+          <label><input type="checkbox" id="redis-no-password"> Disable authentication (noPassword)</label>
+        </div>
+      </div>
+      <div id="postgresql-options-group" style="display: none;">
+        <div class="form-group">
+          <label for="postgresql-locale">Locale</label>
+          <input type="text" id="postgresql-locale" placeholder="e.g., en_US.utf8">
+        </div>
+      </div>
+
       <div class="form-group">
         <label for="sso">Single Sign-On</label>
         <select id="sso">
           <option value="">None</option>
           <option value="proxyAuth">ProxyAuth</option>
-          <option value="simpleAuth">SimpleAuth</option>
           <option value="oidc">OIDC</option>
           <option value="ldap">LDAP</option>
         </select>
+      </div>
+
+      <div id="proxyauth-options-group" style="display: none;">
+        <div class="form-group">
+          <label for="proxyauth-path">Auth Path (restrict to subset, use ! to exclude)</label>
+          <input type="text" id="proxyauth-path" placeholder="e.g., /admin or !/webhooks">
+        </div>
+        <div class="checkbox-grid">
+          <label><input type="checkbox" id="proxyauth-basic-auth"> HTTP Basic Auth</label>
+          <label><input type="checkbox" id="proxyauth-bearer-auth"> Bearer Token Support</label>
+        </div>
       </div>
 
       <div class="form-group">
@@ -352,6 +384,18 @@
           <label for="oidc-redirect-uri">OIDC Login Redirect URI</label>
           <input type="text" id="oidc-redirect-uri" value="/auth/openid/callback">
         </div>
+        <div class="form-group" id="oidc-logout-group" style="display: none;">
+          <label for="oidc-logout-uri">OIDC Logout Redirect URI</label>
+          <input type="text" id="oidc-logout-uri" value="/">
+        </div>
+        <div class="form-group" id="oidc-token-algo-group" style="display: none;">
+          <label for="oidc-token-algo">Token Signature Algorithm</label>
+          <select id="oidc-token-algo">
+            <option value="">Default (RS256)</option>
+            <option value="RS256">RS256</option>
+            <option value="EdDSA">EdDSA</option>
+          </select>
+        </div>
         <div class="form-group">
           <label>Tags</label>
           <div class="checkbox-grid">
@@ -370,6 +414,72 @@
       </details>
 
       <details>
+        <summary>Publishing</summary>
+        <div class="form-group">
+          <label for="packager-name">Packager Name</label>
+          <input type="text" id="packager-name" placeholder="Your Name or Org">
+        </div>
+        <div class="form-group">
+          <label for="packager-url">Packager URL</label>
+          <input type="text" id="packager-url" placeholder="https://example.com/about">
+        </div>
+        <div class="form-group">
+          <label for="icon-url">Icon URL (alternative to file://icon.png)</label>
+          <input type="text" id="icon-url" placeholder="https://example.com/icon.png">
+        </div>
+        <div class="form-group">
+          <label for="media-links">Media Links (one URL per line, 600x200px screenshots)</label>
+          <textarea id="media-links" placeholder="https://example.com/screenshot1.png&#10;https://example.com/screenshot2.png"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="documentation-url">Documentation URL</label>
+          <input type="text" id="documentation-url" placeholder="https://docs.example.com">
+        </div>
+        <div class="form-group">
+          <label for="forum-url">Forum URL</label>
+          <input type="text" id="forum-url" placeholder="https://forum.cloudron.io/topic/...">
+        </div>
+      </details>
+
+      <details>
+        <summary>Advanced</summary>
+        <div class="form-group">
+          <label for="min-box-version">Minimum Cloudron Version</label>
+          <input type="text" id="min-box-version" placeholder="e.g., 7.0.0">
+        </div>
+        <div class="form-group">
+          <label>Capabilities</label>
+          <div class="checkbox-grid">
+            <label><input type="checkbox" class="capability-checkbox" value="net_admin"> net_admin</label>
+            <label><input type="checkbox" class="capability-checkbox" value="mlock"> mlock</label>
+            <label><input type="checkbox" class="capability-checkbox" value="ping"> ping</label>
+            <label><input type="checkbox" class="capability-checkbox" value="vaapi"> vaapi</label>
+          </div>
+        </div>
+        <div class="form-group">
+          <div class="checkbox-grid">
+            <label><input type="checkbox" id="multi-domain"> Support additional domain aliases (multiDomain)</label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="runtime-dirs">Runtime Directories (comma-separated subdirs of /app/code)</label>
+          <input type="text" id="runtime-dirs" placeholder="e.g., tmp, cache">
+        </div>
+        <div class="form-group">
+          <label for="persistent-dirs">Persistent Directories (comma-separated)</label>
+          <input type="text" id="persistent-dirs" placeholder="e.g., data, config">
+        </div>
+        <div class="form-group">
+          <label for="backup-command">Custom Backup Command</label>
+          <input type="text" id="backup-command" placeholder="/app/code/backup.sh">
+        </div>
+        <div class="form-group">
+          <label for="restore-command">Custom Restore Command</label>
+          <input type="text" id="restore-command" placeholder="/app/code/restore.sh">
+        </div>
+      </details>
+
+      <details>
         <summary>Customize addons</summary>
         <div class="form-group">
           <div class="checkbox-grid">
@@ -382,6 +492,18 @@
             <label><input type="checkbox" class="addon-checkbox" value="turn"> TURN</label>
             <label><input type="checkbox" class="addon-checkbox" value="docker"> Docker</label>
           </div>
+        </div>
+        <div id="sendmail-options-group" style="display: none;">
+          <div class="checkbox-grid">
+            <label><input type="checkbox" id="sendmail-optional"> User-configurable (optional)</label>
+            <label><input type="checkbox" id="sendmail-display-name"> Supports display name</label>
+            <label><input type="checkbox" id="sendmail-valid-cert"> Requires valid certificate</label>
+          </div>
+        </div>
+        <div id="scheduler-options-group" style="display: none;">
+          <h4>Scheduled Tasks</h4>
+          <div id="scheduler-tasks-list"></div>
+          <button type="button" class="add-port-btn" id="add-scheduler-task">Add Task</button>
         </div>
       </details>
 
@@ -412,6 +534,7 @@
           <button class="preview-tab" data-target="startsh">startsh</button>
           <button class="preview-tab" data-target="dockerignore">dockerignore</button>
           <button class="preview-tab" data-target="readme">readme</button>
+          <button class="preview-tab" data-target="versions">versions</button>
         </div>
         <button class="copy-btn" data-copy="preview-manifest">Copy</button>
       </div>
@@ -420,6 +543,7 @@
       <div class="preview-content" data-panel="startsh"><pre><code id="preview-startsh"></code></pre></div>
       <div class="preview-content" data-panel="dockerignore"><pre><code id="preview-dockerignore"></code></pre></div>
       <div class="preview-content" data-panel="readme"><pre><code id="preview-readme"></code></pre></div>
+      <div class="preview-content" data-panel="versions"><pre><code id="preview-versions"></code></pre></div>
     </section>
 
     <footer>

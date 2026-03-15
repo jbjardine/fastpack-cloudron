@@ -31,6 +31,7 @@
       generateDescription,
       generateDockerignore,
       generateReadme,
+      generateCloudronVersions,
     } from "./generators.js";
 
     const results = document.getElementById("results");
@@ -130,11 +131,10 @@
     assert("underscores", humanizeImageName("my_cool_app"), "My Cool App");
 
     // ========================================
-    // generateManifest
+    // generateManifest — basic
     // ========================================
-    addSuite("generateManifest");
+    addSuite("generateManifest — basic");
 
-    // Basic config
     const basicConfig = {
       id: "com.example.test",
       title: "Test App",
@@ -185,6 +185,11 @@
     assert("full: tagline present", fullManifest.tagline, "A short tagline");
     assert("full: description uses file://", fullManifest.description, "file://DESCRIPTION.md");
 
+    // ========================================
+    // generateManifest — SSO addons
+    // ========================================
+    addSuite("generateManifest — SSO addons");
+
     // OIDC with custom redirect URI
     const oidcCustomConfig = {
       id: "com.example.oidc",
@@ -196,6 +201,8 @@
       database: null,
       sso: "oidc",
       oidcRedirectUri: "/custom/callback",
+      oidcLogoutUri: "/logout",
+      oidcTokenAlgo: "EdDSA",
       addons: [],
       tcpPorts: [],
       udpPorts: [],
@@ -205,11 +212,61 @@
     };
     const oidcCustomManifest = JSON.parse(generateManifest(oidcCustomConfig));
     assert("oidc custom: loginRedirectUri", oidcCustomManifest.addons.oidc.loginRedirectUri, "/custom/callback");
+    assert("oidc custom: logoutRedirectUri", oidcCustomManifest.addons.oidc.logoutRedirectUri, "/logout");
+    assert("oidc custom: tokenSignatureAlgorithm", oidcCustomManifest.addons.oidc.tokenSignatureAlgorithm, "EdDSA");
 
-    // ProxyAuth config — Fix #7: lowercase proxyauth in manifest
+    // OIDC defaults
+    const oidcDefaultConfig = {
+      id: "com.example.oidc2",
+      title: "OIDC App2",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: null,
+      sso: "oidc",
+      addons: [],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+    };
+    const oidcDefaultManifest = JSON.parse(generateManifest(oidcDefaultConfig));
+    assert("oidc default: logoutRedirectUri defaults to /", oidcDefaultManifest.addons.oidc.logoutRedirectUri, "/");
+    assert("oidc default: no tokenSignatureAlgorithm when empty", oidcDefaultManifest.addons.oidc.tokenSignatureAlgorithm, undefined);
+
+    // ProxyAuth config with options
     const proxyAuthConfig = {
       id: "com.example.proxy",
       title: "Proxy App",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: null,
+      sso: "proxyAuth",
+      proxyauthPath: "/admin",
+      proxyauthBasicAuth: true,
+      proxyauthBearerAuth: true,
+      addons: [],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+    };
+    const proxyManifest = JSON.parse(generateManifest(proxyAuthConfig));
+    assert("proxyauth: lowercase key in manifest", proxyManifest.addons.proxyauth !== undefined, true);
+    assert("proxyauth: no camelCase key", proxyManifest.addons.proxyAuth, undefined);
+    assert("proxyauth: path option", proxyManifest.addons.proxyauth.path, "/admin");
+    assert("proxyauth: basicAuth option", proxyManifest.addons.proxyauth.basicAuth, true);
+    assert("proxyauth: supportsBearerAuth option", proxyManifest.addons.proxyauth.supportsBearerAuth, true);
+
+    // ProxyAuth without options
+    const proxyNoOptsConfig = {
+      id: "com.example.proxy2",
+      title: "Proxy App2",
       version: "1.0.0",
       httpPort: 8080,
       healthCheckPath: "/",
@@ -223,9 +280,8 @@
       tagline: "",
       description: "",
     };
-    const proxyManifest = JSON.parse(generateManifest(proxyAuthConfig));
-    assert("proxyauth: lowercase key in manifest", JSON.stringify(proxyManifest.addons.proxyauth), "{}");
-    assert("proxyauth: no camelCase key", proxyManifest.addons.proxyAuth, undefined);
+    const proxyNoOptsManifest = JSON.parse(generateManifest(proxyNoOptsConfig));
+    assert("proxyauth no opts: empty object", JSON.stringify(proxyNoOptsManifest.addons.proxyauth), "{}");
 
     // LDAP config
     const ldapConfig = {
@@ -248,16 +304,22 @@
     assert("ldap: ldap addon present", JSON.stringify(ldapManifest.addons.ldap), "{}");
     assert("ldap: no optionalSso with ldap", ldapManifest.optionalSso, undefined);
 
-    // SimpleAuth config
-    const simpleAuthConfig = {
-      id: "com.example.simple",
-      title: "Simple App",
+    // ========================================
+    // generateManifest — database addon options
+    // ========================================
+    addSuite("generateManifest — database addon options");
+
+    // MySQL with multipleDatabases
+    const mysqlConfig = {
+      id: "com.example.mysql",
+      title: "MySQL App",
       version: "1.0.0",
       httpPort: 8080,
       healthCheckPath: "/",
       hasWebUI: true,
-      database: null,
-      sso: "simpleAuth",
+      database: "mysql",
+      mysqlMultipleDbs: true,
+      sso: null,
       addons: [],
       tcpPorts: [],
       udpPorts: [],
@@ -265,9 +327,193 @@
       tagline: "",
       description: "",
     };
-    const simpleManifest = JSON.parse(generateManifest(simpleAuthConfig));
-    assert("simpleauth: lowercase key in manifest", JSON.stringify(simpleManifest.addons.simpleauth), "{}");
-    assert("simpleauth: no optionalSso", simpleManifest.optionalSso, undefined);
+    const mysqlManifest = JSON.parse(generateManifest(mysqlConfig));
+    assert("mysql: multipleDatabases", mysqlManifest.addons.mysql.multipleDatabases, true);
+
+    // MongoDB with oplog
+    const mongoConfig = {
+      id: "com.example.mongo",
+      title: "Mongo App",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: "mongodb",
+      mongodbOplog: true,
+      sso: null,
+      addons: [],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+    };
+    const mongoManifest = JSON.parse(generateManifest(mongoConfig));
+    assert("mongodb: oplog", mongoManifest.addons.mongodb.oplog, true);
+
+    // Redis with noPassword
+    const redisConfig = {
+      id: "com.example.redis",
+      title: "Redis App",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: "redis",
+      redisNoPassword: true,
+      sso: null,
+      addons: [],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+    };
+    const redisManifest = JSON.parse(generateManifest(redisConfig));
+    assert("redis: noPassword", redisManifest.addons.redis.noPassword, true);
+
+    // PostgreSQL with locale
+    const pgLocaleConfig = {
+      id: "com.example.pg",
+      title: "PG App",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: "postgresql",
+      postgresqlLocale: "en_US.utf8",
+      sso: null,
+      addons: [],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+    };
+    const pgLocaleManifest = JSON.parse(generateManifest(pgLocaleConfig));
+    assert("postgresql: locale", pgLocaleManifest.addons.postgresql.locale, "en_US.utf8");
+
+    // Database without options (empty object)
+    const pgNoOptsConfig = {
+      id: "com.example.pg2",
+      title: "PG App2",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: "postgresql",
+      sso: null,
+      addons: [],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+    };
+    const pgNoOptsManifest = JSON.parse(generateManifest(pgNoOptsConfig));
+    assert("postgresql no opts: empty object", JSON.stringify(pgNoOptsManifest.addons.postgresql), "{}");
+
+    // ========================================
+    // generateManifest — addon options (sendmail, scheduler)
+    // ========================================
+    addSuite("generateManifest — addon options");
+
+    // Sendmail with options
+    const sendmailConfig = {
+      id: "com.example.sm",
+      title: "SM App",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: null,
+      sso: null,
+      addons: ["sendmail"],
+      sendmailOptional: true,
+      sendmailDisplayName: true,
+      sendmailValidCert: true,
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+    };
+    const smManifest = JSON.parse(generateManifest(sendmailConfig));
+    assert("sendmail: optional", smManifest.addons.sendmail.optional, true);
+    assert("sendmail: supportsDisplayName", smManifest.addons.sendmail.supportsDisplayName, true);
+    assert("sendmail: requiresValidCertificate", smManifest.addons.sendmail.requiresValidCertificate, true);
+
+    // Sendmail without options
+    const sendmailNoOptsConfig = {
+      id: "com.example.sm2",
+      title: "SM App2",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: null,
+      sso: null,
+      addons: ["sendmail"],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+    };
+    const smNoOptsManifest = JSON.parse(generateManifest(sendmailNoOptsConfig));
+    assert("sendmail no opts: empty object", JSON.stringify(smNoOptsManifest.addons.sendmail), "{}");
+
+    // Scheduler with tasks
+    const schedulerConfig = {
+      id: "com.example.sched",
+      title: "Sched App",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: null,
+      sso: null,
+      addons: ["scheduler"],
+      schedulerTasks: [
+        { name: "cleanup", schedule: "0 3 * * *", command: "/app/code/cleanup.sh" },
+        { name: "sync", schedule: "*/5 * * * *", command: "/app/code/sync.sh" },
+      ],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+    };
+    const schedManifest = JSON.parse(generateManifest(schedulerConfig));
+    assert("scheduler: cleanup task schedule", schedManifest.addons.scheduler.cleanup.schedule, "0 3 * * *");
+    assert("scheduler: cleanup task command", schedManifest.addons.scheduler.cleanup.command, "/app/code/cleanup.sh");
+    assert("scheduler: sync task schedule", schedManifest.addons.scheduler.sync.schedule, "*/5 * * * *");
+
+    // Scheduler without tasks
+    const schedulerNoTasksConfig = {
+      id: "com.example.sched2",
+      title: "Sched App2",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: null,
+      sso: null,
+      addons: ["scheduler"],
+      schedulerTasks: [],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+    };
+    const schedNoTasksManifest = JSON.parse(generateManifest(schedulerNoTasksConfig));
+    assert("scheduler no tasks: empty object", JSON.stringify(schedNoTasksManifest.addons.scheduler), "{}");
+
+    // ========================================
+    // generateManifest — ports
+    // ========================================
+    addSuite("generateManifest — ports");
 
     // UDP ports config
     const udpConfig = {
@@ -289,7 +535,11 @@
     const udpManifest = JSON.parse(generateManifest(udpConfig));
     assert("udp: udpPorts present", udpManifest.udpPorts.DNS_PORT.containerPort, 53);
 
-    // Publishing fields
+    // ========================================
+    // generateManifest — publishing fields
+    // ========================================
+    addSuite("generateManifest — publishing fields");
+
     const publishConfig = {
       id: "com.example.pub",
       title: "Pub App",
@@ -314,6 +564,12 @@
       changelog: "## 1.0.0\n- Initial release",
       icon: "file://icon.png",
       memoryLimit: 536870912,
+      packagerName: "Test Packager",
+      packagerUrl: "https://packager.example.com",
+      iconUrl: "https://example.com/icon.png",
+      mediaLinks: ["https://example.com/shot1.png", "https://example.com/shot2.png"],
+      documentationUrl: "https://docs.example.com",
+      forumUrl: "https://forum.example.com",
     };
     const pubManifest = JSON.parse(generateManifest(publishConfig));
     assert("pub: website", pubManifest.website, "https://example.com");
@@ -326,6 +582,13 @@
     assert("pub: changelog", pubManifest.changelog, "## 1.0.0\n- Initial release");
     assert("pub: icon", pubManifest.icon, "file://icon.png");
     assert("pub: memoryLimit", pubManifest.memoryLimit, 536870912);
+    assert("pub: packagerName", pubManifest.packagerName, "Test Packager");
+    assert("pub: packagerUrl", pubManifest.packagerUrl, "https://packager.example.com");
+    assert("pub: iconUrl", pubManifest.iconUrl, "https://example.com/icon.png");
+    assert("pub: mediaLinks count", pubManifest.mediaLinks.length, 2);
+    assert("pub: mediaLinks[0]", pubManifest.mediaLinks[0], "https://example.com/shot1.png");
+    assert("pub: documentationUrl", pubManifest.documentationUrl, "https://docs.example.com");
+    assert("pub: forumUrl", pubManifest.forumUrl, "https://forum.example.com");
 
     // No publishing fields when empty
     const noPubManifest = JSON.parse(generateManifest(basicConfig));
@@ -335,6 +598,61 @@
     assert("nopub: no changelog when empty", noPubManifest.changelog, undefined);
     assert("nopub: no icon when empty", noPubManifest.icon, undefined);
     assert("nopub: no memoryLimit when 0", noPubManifest.memoryLimit, undefined);
+    assert("nopub: no packagerName when empty", noPubManifest.packagerName, undefined);
+    assert("nopub: no packagerUrl when empty", noPubManifest.packagerUrl, undefined);
+    assert("nopub: no iconUrl when empty", noPubManifest.iconUrl, undefined);
+    assert("nopub: no mediaLinks when empty", noPubManifest.mediaLinks, undefined);
+    assert("nopub: no documentationUrl when empty", noPubManifest.documentationUrl, undefined);
+    assert("nopub: no forumUrl when empty", noPubManifest.forumUrl, undefined);
+
+    // ========================================
+    // generateManifest — advanced fields
+    // ========================================
+    addSuite("generateManifest — advanced fields");
+
+    const advancedConfig = {
+      id: "com.example.adv",
+      title: "Adv App",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: null,
+      sso: null,
+      addons: [],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+      minBoxVersion: "7.4.0",
+      capabilities: ["net_admin", "mlock"],
+      multiDomain: true,
+      runtimeDirs: ["tmp", "cache"],
+      persistentDirs: ["data"],
+      backupCommand: "/app/code/backup.sh",
+      restoreCommand: "/app/code/restore.sh",
+    };
+    const advManifest = JSON.parse(generateManifest(advancedConfig));
+    assert("adv: minBoxVersion", advManifest.minBoxVersion, "7.4.0");
+    assert("adv: capabilities count", advManifest.capabilities.length, 2);
+    assert("adv: capabilities[0]", advManifest.capabilities[0], "net_admin");
+    assert("adv: multiDomain", advManifest.multiDomain, true);
+    assert("adv: runtimeDirs count", advManifest.runtimeDirs.length, 2);
+    assert("adv: runtimeDirs[0]", advManifest.runtimeDirs[0], "tmp");
+    assert("adv: persistentDirs count", advManifest.persistentDirs.length, 1);
+    assert("adv: backupCommand", advManifest.backupCommand, "/app/code/backup.sh");
+    assert("adv: restoreCommand", advManifest.restoreCommand, "/app/code/restore.sh");
+
+    // No advanced fields when empty
+    const noAdvManifest = JSON.parse(generateManifest(basicConfig));
+    assert("noadv: no minBoxVersion", noAdvManifest.minBoxVersion, undefined);
+    assert("noadv: no capabilities", noAdvManifest.capabilities, undefined);
+    assert("noadv: no multiDomain", noAdvManifest.multiDomain, undefined);
+    assert("noadv: no runtimeDirs", noAdvManifest.runtimeDirs, undefined);
+    assert("noadv: no persistentDirs", noAdvManifest.persistentDirs, undefined);
+    assert("noadv: no backupCommand", noAdvManifest.backupCommand, undefined);
+    assert("noadv: no restoreCommand", noAdvManifest.restoreCommand, undefined);
 
     // ========================================
     // generateDockerfile
@@ -372,7 +690,7 @@
     assertIncludes("tcp: EXPOSE includes tcp port", tcpDockerfile, "1883");
     assertIncludes("tcp: python3 install for TCP mode", tcpDockerfile, "Install python3");
 
-    // Web mode with extra ports — ports always exposed now
+    // Web mode with extra ports
     const webWithPortsConfig = {
       image: "nginx:latest",
       httpPort: 8080,
@@ -459,6 +777,10 @@
     const dockerignore = generateDockerignore();
     assertIncludes("has .git", dockerignore, ".git");
     assertIncludes("has README.md", dockerignore, "README.md");
+    assertIncludes("has test.html", dockerignore, "test.html");
+    assertIncludes("has CHANGELOG.md", dockerignore, "CHANGELOG.md");
+    assertIncludes("has node_modules/", dockerignore, "node_modules/");
+    assertIncludes("has .claude/", dockerignore, ".claude/");
 
     // ========================================
     // generateReadme
@@ -474,9 +796,15 @@
     assertIncludes("has title", readme, "# Test App");
     assertIncludes("cloudron build", readme, "cloudron build");
     assertIncludes("cloudron install (no --image flag)", readme, "cloudron install");
-    assertNotIncludes("no --image in install command", readme, "cloudron install --image");
+    // The deployment section should have bare "cloudron install" (no --image)
+    // but the Alternative Build section legitimately uses --image
+    const deploySection = readme.split("## Update")[0];
+    assertNotIncludes("no --image in deploy section", deploySection, "cloudron install --image");
     assertIncludes("non-root caveat", readme, "non-root");
     assertIncludes("logging guidance", readme, "stdout/stderr");
+    assertIncludes("alternative build methods section", readme, "Alternative Build Methods");
+    assertIncludes("local docker build", readme, "docker build");
+    assertIncludes("build service link", readme, "Docker Builder");
     assertNotIncludes("web: no TCP-only note", readme, "TCP-only mode");
 
     // TCP mode README
@@ -488,6 +816,20 @@
     const tcpReadme = generateReadme(tcpReadmeConfig);
     assertIncludes("tcp: has TCP-only note", tcpReadme, "TCP-only mode");
     assertIncludes("tcp: mentions health-check", tcpReadme, "health-check");
+
+    // ========================================
+    // generateCloudronVersions
+    // ========================================
+    addSuite("generateCloudronVersions");
+
+    const versionsConfig = {
+      id: "com.example.app",
+      version: "1.0.0",
+    };
+    const versions = JSON.parse(generateCloudronVersions(versionsConfig));
+    assert("versions: has version key", versions["1.0.0"] !== undefined, true);
+    assertIncludes("versions: image contains id", versions["1.0.0"].image, "com.example.app");
+    assertIncludes("versions: image contains version", versions["1.0.0"].image, "1.0.0");
 
     // ========================================
     // Summary

@@ -84,11 +84,54 @@ export function generateManifest(config) {
   if (config.changelog && config.changelog.trim() !== "") {
     manifest.changelog = config.changelog;
   }
-  if (config.icon && config.icon.trim() !== "" && config.iconAssetIncluded) {
+  if (config.icon && config.icon.trim() !== "") {
     manifest.icon = config.icon;
   }
   if (config.memoryLimit && config.memoryLimit > 0) {
     manifest.memoryLimit = config.memoryLimit;
+  }
+
+  // Publishing fields
+  if (config.packagerName && config.packagerName.trim() !== "") {
+    manifest.packagerName = config.packagerName;
+  }
+  if (config.packagerUrl && config.packagerUrl.trim() !== "") {
+    manifest.packagerUrl = config.packagerUrl;
+  }
+  if (config.iconUrl && config.iconUrl.trim() !== "") {
+    manifest.iconUrl = config.iconUrl;
+  }
+  if (config.mediaLinks && config.mediaLinks.length > 0) {
+    manifest.mediaLinks = config.mediaLinks;
+  }
+  if (config.documentationUrl && config.documentationUrl.trim() !== "") {
+    manifest.documentationUrl = config.documentationUrl;
+  }
+  if (config.forumUrl && config.forumUrl.trim() !== "") {
+    manifest.forumUrl = config.forumUrl;
+  }
+
+  // Advanced fields
+  if (config.minBoxVersion && config.minBoxVersion.trim() !== "") {
+    manifest.minBoxVersion = config.minBoxVersion;
+  }
+  if (config.capabilities && config.capabilities.length > 0) {
+    manifest.capabilities = config.capabilities;
+  }
+  if (config.multiDomain) {
+    manifest.multiDomain = true;
+  }
+  if (config.runtimeDirs && config.runtimeDirs.length > 0) {
+    manifest.runtimeDirs = config.runtimeDirs;
+  }
+  if (config.persistentDirs && config.persistentDirs.length > 0) {
+    manifest.persistentDirs = config.persistentDirs;
+  }
+  if (config.backupCommand && config.backupCommand.trim() !== "") {
+    manifest.backupCommand = config.backupCommand;
+  }
+  if (config.restoreCommand && config.restoreCommand.trim() !== "") {
+    manifest.restoreCommand = config.restoreCommand;
   }
 
   // SSO at root level: optionalSso when sso is null or "none"
@@ -99,29 +142,64 @@ export function generateManifest(config) {
   // Addons object
   const addons = {};
 
-  // Database addon
+  // Database addon (with per-database options)
   if (config.database && config.database !== "none") {
-    addons[config.database] = {};
+    const dbOpts = {};
+    if (config.database === "mysql" && config.mysqlMultipleDbs) {
+      dbOpts.multipleDatabases = true;
+    }
+    if (config.database === "mongodb" && config.mongodbOplog) {
+      dbOpts.oplog = true;
+    }
+    if (config.database === "redis" && config.redisNoPassword) {
+      dbOpts.noPassword = true;
+    }
+    if (config.database === "postgresql" && config.postgresqlLocale && config.postgresqlLocale.trim() !== "") {
+      dbOpts.locale = config.postgresqlLocale;
+    }
+    addons[config.database] = dbOpts;
   }
 
-  // SSO addons — Fix #7: use lowercase "proxyauth" per Cloudron manifest spec
+  // SSO addons with per-addon options
   if (config.sso === "proxyAuth") {
-    addons.proxyauth = {};
-  } else if (config.sso === "simpleAuth") {
-    addons.simpleauth = {};
+    const proxyOpts = {};
+    if (config.proxyauthPath) proxyOpts.path = config.proxyauthPath;
+    if (config.proxyauthBasicAuth) proxyOpts.basicAuth = true;
+    if (config.proxyauthBearerAuth) proxyOpts.supportsBearerAuth = true;
+    addons.proxyauth = proxyOpts;
   } else if (config.sso === "oidc") {
-    addons.oidc = {
+    const oidcOpts = {
       loginRedirectUri: config.oidcRedirectUri || "/auth/openid/callback",
-      logoutRedirectUri: "/",
+      logoutRedirectUri: config.oidcLogoutUri || "/",
     };
+    if (config.oidcTokenAlgo) {
+      oidcOpts.tokenSignatureAlgorithm = config.oidcTokenAlgo;
+    }
+    addons.oidc = oidcOpts;
   } else if (config.sso === "ldap") {
     addons.ldap = {};
   }
 
-  // Additional addons from array
+  // Additional addons from array (with per-addon options)
   if (config.addons && Array.isArray(config.addons)) {
     for (const addon of config.addons) {
-      addons[addon] = {};
+      if (addon === "sendmail") {
+        const smOpts = {};
+        if (config.sendmailOptional) smOpts.optional = true;
+        if (config.sendmailDisplayName) smOpts.supportsDisplayName = true;
+        if (config.sendmailValidCert) smOpts.requiresValidCertificate = true;
+        addons.sendmail = smOpts;
+      } else if (addon === "scheduler" && config.schedulerTasks && config.schedulerTasks.length > 0) {
+        const tasks = {};
+        for (const task of config.schedulerTasks) {
+          if (task.name) {
+            tasks[task.name] = { schedule: task.schedule, command: task.command };
+          }
+        }
+        addons.scheduler = tasks;
+      } else {
+        addons[addon] = addons[addon] || {};
+      }
     }
   }
 
@@ -297,7 +375,16 @@ export function generateDescription(config) {
  * Returns static .dockerignore content.
  */
 export function generateDockerignore() {
-  return ".git\nREADME.md\n";
+  return [
+    ".git",
+    "README.md",
+    "test.html",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    ".claude/",
+    "node_modules/",
+  ].join("\n") + "\n";
 }
 
 /**
@@ -325,6 +412,20 @@ export function generateReadme(config) {
   lines.push("cloudron update --app <app-id>");
   lines.push("```");
   lines.push("");
+  lines.push("## Alternative Build Methods");
+  lines.push("");
+  lines.push("### Local Docker build");
+  lines.push("");
+  lines.push("```bash");
+  lines.push("docker build -t your-image-name .");
+  lines.push("cloudron install --image your-image-name");
+  lines.push("```");
+  lines.push("");
+  lines.push("### Cloudron Build Service");
+  lines.push("");
+  lines.push("Push your package source to a Git repository and use the");
+  lines.push("Cloudron [Docker Builder](https://docs.cloudron.io/packaging/tutorial/#build-service) app.");
+  lines.push("");
   lines.push("## Notes");
   lines.push("");
   lines.push(
@@ -340,4 +441,15 @@ export function generateReadme(config) {
   }
 
   return lines.join("\n") + "\n";
+}
+
+/**
+ * Generates CloudronVersions.json for community app publishing.
+ */
+export function generateCloudronVersions(config) {
+  const versions = {};
+  versions[config.version] = {
+    image: `docker.io/USERNAME/${config.id || "your-app"}:${config.version}`,
+  };
+  return JSON.stringify(versions, null, 2);
 }
