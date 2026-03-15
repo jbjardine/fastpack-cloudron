@@ -84,7 +84,7 @@ export function generateManifest(config) {
   if (config.changelog && config.changelog.trim() !== "") {
     manifest.changelog = config.changelog;
   }
-  if (config.icon && config.icon.trim() !== "") {
+  if (config.icon && config.icon.trim() !== "" && config.iconAssetIncluded) {
     manifest.icon = config.icon;
   }
   if (config.memoryLimit && config.memoryLimit > 0) {
@@ -179,7 +179,7 @@ export function generateDockerfile(config) {
     else \\
       echo \"No supported package manager found; creating a gosu shim using su\"; \\
       mkdir -p /usr/local/bin; \\
-      printf '#!/bin/sh\\nUSER=$1; shift\\nexec su -s /bin/sh \"$USER\" -c \"exec $*\"\\n' > /usr/local/bin/gosu; \\
+      printf '#!/bin/sh\\nUSER=$(echo \"$1\" | cut -d: -f1); shift\\nexec su -s /bin/sh \"$USER\" -c \"exec $*\"\\n' > /usr/local/bin/gosu; \\
       chmod +x /usr/local/bin/gosu; \\
     fi`);
   lines.push("");
