@@ -259,8 +259,12 @@
           <input type="text" id="app-author" placeholder="Your Name">
         </div>
         <div class="form-group">
+          <label for="app-tagline">Tagline</label>
+          <input type="text" id="app-tagline" placeholder="Short one-line description for the App Store">
+        </div>
+        <div class="form-group">
           <label for="app-description">Description</label>
-          <textarea id="app-description" placeholder="App description"></textarea>
+          <textarea id="app-description" placeholder="App description (markdown)"></textarea>
         </div>
         <div class="form-group">
           <label for="health-check-path">Health Check Path</label>
@@ -271,6 +275,10 @@
           <label for="http-port">HTTP Port</label>
           <input type="number" id="http-port" value="8000">
           <span class="field-error" data-error-for="http-port"></span>
+        </div>
+        <div class="form-group" id="oidc-redirect-group" style="display: none;">
+          <label for="oidc-redirect-uri">OIDC Login Redirect URI</label>
+          <input type="text" id="oidc-redirect-uri" value="/auth/openid/callback">
         </div>
       </details>
 
@@ -326,8 +334,8 @@
     </footer>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/file-saver@2/dist/FileSaver.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js" integrity="sha384-mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/file-saver@2/dist/FileSaver.min.js" integrity="sha384-PlRSzpewlarQuj5alIadXwjNUX+2eNMKwr0f07ShWYLy8B6TjEbm7ZlcN/ScSbwy" crossorigin="anonymous"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>
