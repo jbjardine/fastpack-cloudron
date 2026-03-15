@@ -24,7 +24,9 @@ function buildConfig() {
   const databaseEl = document.getElementById('database');
   const ssoEl = document.getElementById('sso');
   const authorEl = document.getElementById('app-author');
+  const taglineEl = document.getElementById('app-tagline');
   const descriptionEl = document.getElementById('app-description');
+  const oidcRedirectUriEl = document.getElementById('oidc-redirect-uri');
 
   const image = imageEl.value.trim();
 
@@ -101,7 +103,9 @@ function buildConfig() {
     tcpPorts,
     udpPorts,
     author: authorEl.value.trim(),
+    tagline: taglineEl.value.trim(),
     description: descriptionEl.value.trim(),
+    oidcRedirectUri: oidcRedirectUriEl.value.trim() || '/auth/openid/callback',
   };
 }
 
@@ -145,23 +149,24 @@ function validate(config) {
     });
   }
 
-  // Port conflicts — collect all used ports
-  const usedPorts = new Set();
-  usedPorts.add(config.httpPort);
+  // Port conflicts — TCP and UDP are separate namespaces
+  const usedTcpPorts = new Set();
+  usedTcpPorts.add(config.httpPort); // httpPort is TCP
   let hasPortConflict = false;
 
   for (const port of config.tcpPorts) {
-    if (port.containerPort && usedPorts.has(port.containerPort)) {
+    if (port.containerPort && usedTcpPorts.has(port.containerPort)) {
       hasPortConflict = true;
     }
-    if (port.containerPort) usedPorts.add(port.containerPort);
+    if (port.containerPort) usedTcpPorts.add(port.containerPort);
   }
 
+  const usedUdpPorts = new Set();
   for (const port of config.udpPorts) {
-    if (port.containerPort && usedPorts.has(port.containerPort)) {
+    if (port.containerPort && usedUdpPorts.has(port.containerPort)) {
       hasPortConflict = true;
     }
-    if (port.containerPort) usedPorts.add(port.containerPort);
+    if (port.containerPort) usedUdpPorts.add(port.containerPort);
   }
 
   if (hasPortConflict) {
@@ -239,6 +244,10 @@ function updatePreview() {
   // Show/hide HTTP port group based on web UI selection
   const httpPortGroup = document.getElementById('http-port-group');
   httpPortGroup.style.display = config.hasWebUI ? '' : 'none';
+
+  // Show/hide OIDC redirect URI field based on SSO selection
+  const oidcGroup = document.getElementById('oidc-redirect-group');
+  oidcGroup.style.display = config.sso === 'oidc' ? '' : 'none';
 
   // Update auto-generated fields if not user-edited
   const idEl = document.getElementById('app-id');

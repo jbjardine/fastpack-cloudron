@@ -147,6 +147,7 @@
       tcpPorts: [],
       udpPorts: [],
       author: "",
+      tagline: "",
       description: "",
     };
     const basicManifest = JSON.parse(generateManifest(basicConfig));
@@ -155,6 +156,7 @@
     assert("basic: optionalSso when sso=null", basicManifest.optionalSso, true);
     assert("basic: localstorage addon present", JSON.stringify(basicManifest.addons.localstorage), "{}");
     assert("basic: no tcpPorts when empty", basicManifest.tcpPorts, undefined);
+    assert("basic: no tagline when empty", basicManifest.tagline, undefined);
 
     // Full config
     const fullConfig = {
@@ -170,14 +172,58 @@
       tcpPorts: [{ name: "MQTT_PORT", title: "MQTT", containerPort: 1883, defaultValue: 1883 }],
       udpPorts: [],
       author: "Test Author",
+      tagline: "A short tagline",
       description: "A test app",
     };
     const fullManifest = JSON.parse(generateManifest(fullConfig));
     assert("full: postgresql addon", JSON.stringify(fullManifest.addons.postgresql), "{}");
-    assert("full: oidc loginRedirectUri", fullManifest.addons.oidc.loginRedirectUri, "/auth/callback");
+    assert("full: oidc default loginRedirectUri", fullManifest.addons.oidc.loginRedirectUri, "/auth/openid/callback");
     assert("full: no optionalSso with oidc", fullManifest.optionalSso, undefined);
     assert("full: tcpPorts present", fullManifest.tcpPorts.MQTT_PORT.containerPort, 1883);
     assert("full: sendmail addon", JSON.stringify(fullManifest.addons.sendmail), "{}");
+    assert("full: tagline present", fullManifest.tagline, "A short tagline");
+
+    // OIDC with custom redirect URI
+    const oidcCustomConfig = {
+      id: "com.example.oidc",
+      title: "OIDC App",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: null,
+      sso: "oidc",
+      oidcRedirectUri: "/custom/callback",
+      addons: [],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+    };
+    const oidcCustomManifest = JSON.parse(generateManifest(oidcCustomConfig));
+    assert("oidc custom: loginRedirectUri", oidcCustomManifest.addons.oidc.loginRedirectUri, "/custom/callback");
+
+    // ProxyAuth config — Fix #7: lowercase proxyauth in manifest
+    const proxyAuthConfig = {
+      id: "com.example.proxy",
+      title: "Proxy App",
+      version: "1.0.0",
+      httpPort: 8080,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: null,
+      sso: "proxyAuth",
+      addons: [],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+    };
+    const proxyManifest = JSON.parse(generateManifest(proxyAuthConfig));
+    assert("proxyauth: lowercase key in manifest", JSON.stringify(proxyManifest.addons.proxyauth), "{}");
+    assert("proxyauth: no camelCase key", proxyManifest.addons.proxyAuth, undefined);
 
     // LDAP config
     const ldapConfig = {
@@ -193,6 +239,7 @@
       tcpPorts: [],
       udpPorts: [],
       author: "",
+      tagline: "",
       description: "",
     };
     const ldapManifest = JSON.parse(generateManifest(ldapConfig));
@@ -213,6 +260,7 @@
       tcpPorts: [],
       udpPorts: [{ name: "DNS_PORT", title: "DNS", containerPort: 53, defaultValue: 5353 }],
       author: "",
+      tagline: "",
       description: "",
     };
     const udpManifest = JSON.parse(generateManifest(udpConfig));
@@ -233,10 +281,13 @@
     };
     const webDockerfile = generateDockerfile(webDockerConfig);
     assertIncludes("web: FROM", webDockerfile, "FROM nginx:latest");
-    assertIncludes("web: EXPOSE only httpPort", webDockerfile, "EXPOSE 8080");
+    assertIncludes("web: EXPOSE httpPort", webDockerfile, "EXPOSE 8080");
     assertIncludes("web: CMD", webDockerfile, 'CMD ["/app/code/start.sh"]');
+    assertIncludes("web: gosu install", webDockerfile, "apt-get install -y gosu");
+    assertIncludes("web: mkdir /app/code", webDockerfile, "mkdir -p /app/code");
+    assertNotIncludes("web: no mkdir /app/data", webDockerfile, "/app/data");
 
-    // TCP mode
+    // TCP mode — ports always exposed
     const tcpDockerConfig = {
       image: "eclipse-mosquitto:2.0",
       httpPort: 8080,
@@ -246,6 +297,17 @@
     };
     const tcpDockerfile = generateDockerfile(tcpDockerConfig);
     assertIncludes("tcp: EXPOSE includes tcp port", tcpDockerfile, "1883");
+
+    // Web mode with extra ports — ports always exposed now
+    const webWithPortsConfig = {
+      image: "nginx:latest",
+      httpPort: 8080,
+      hasWebUI: true,
+      tcpPorts: [{ name: "EXTRA_PORT", title: "Extra", containerPort: 9090, defaultValue: 9090 }],
+      udpPorts: [],
+    };
+    const webWithPortsDockerfile = generateDockerfile(webWithPortsConfig);
+    assertIncludes("web+ports: EXPOSE includes extra tcp port", webWithPortsDockerfile, "9090");
 
     // UDP mode
     const udpDockerConfig = {
@@ -271,7 +333,7 @@
     };
     const webStart = generateStartSh(webStartConfig);
     assertIncludes("web: shebang", webStart, "#!/bin/sh");
-    assertIncludes("web: exec", webStart, "exec");
+    assertIncludes("web: exec with gosu", webStart, "exec /usr/local/bin/gosu cloudron:cloudron");
     assertNotIncludes("web: no python", webStart, "python");
     assertIncludes("web: chown with localstorage", webStart, "chown");
     assertIncludes("web: initialized guard", webStart, ".initialized");
@@ -284,8 +346,12 @@
     };
     const tcpStart = generateStartSh(tcpStartConfig);
     assertIncludes("tcp: python healthcheck", tcpStart, "python");
+    assertIncludes("tcp: minimal healthcheck (no SimpleHTTPRequestHandler)", tcpStart, "do_GET");
+    assertNotIncludes("tcp: no SimpleHTTPRequestHandler", tcpStart, "SimpleHTTPRequestHandler");
     assertIncludes("tcp: wait", tcpStart, "wait");
     assertNotIncludes("tcp: no chown without localstorage", tcpStart, "chown");
+    assertIncludes("tcp: signal trap", tcpStart, "trap");
+    assertIncludes("tcp: gosu for service", tcpStart, "/usr/local/bin/gosu cloudron:cloudron");
 
     // TCP mode with localstorage
     const tcpStorageConfig = {
@@ -319,8 +385,10 @@
     const readme = generateReadme(readmeConfig);
     assertIncludes("has title", readme, "# Test App");
     assertIncludes("cloudron build", readme, "cloudron build");
-    assertIncludes("cloudron install", readme, "cloudron install");
+    assertIncludes("cloudron install (no --image flag)", readme, "cloudron install");
+    assertNotIncludes("no --image in install command", readme, "cloudron install --image");
     assertIncludes("non-root caveat", readme, "non-root");
+    assertIncludes("logging guidance", readme, "stdout/stderr");
 
     // ========================================
     // Summary

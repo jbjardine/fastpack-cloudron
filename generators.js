@@ -49,6 +49,11 @@ export function generateManifest(config) {
   manifest.healthCheckPath = config.healthCheckPath || "/";
   manifest.httpPort = config.httpPort;
 
+  // tagline only if non-empty
+  if (config.tagline && config.tagline.trim() !== "") {
+    manifest.tagline = config.tagline;
+  }
+
   // author and description only if non-empty
   if (config.author && config.author.trim() !== "") {
     manifest.author = config.author;
@@ -70,12 +75,12 @@ export function generateManifest(config) {
     addons[config.database] = {};
   }
 
-  // SSO addons
+  // SSO addons — Fix #7: use lowercase "proxyauth" per Cloudron manifest spec
   if (config.sso === "proxyAuth") {
-    addons.proxyAuth = {};
+    addons.proxyauth = {};
   } else if (config.sso === "oidc") {
     addons.oidc = {
-      loginRedirectUri: "/auth/callback",
+      loginRedirectUri: config.oidcRedirectUri || "/auth/openid/callback",
       logoutRedirectUri: "/",
     };
   } else if (config.sso === "ldap") {
@@ -122,12 +127,17 @@ export function generateManifest(config) {
 
 /**
  * Generates Dockerfile content.
+ * Fix #5: removed unnecessary mkdir /app/data (mounted by Cloudron with localstorage addon)
+ * Fix #1: install gosu for non-root execution
  */
 export function generateDockerfile(config) {
   const lines = [];
   lines.push(`FROM ${config.image}`);
   lines.push("");
-  lines.push("RUN mkdir -p /app/code /app/data");
+  lines.push("RUN mkdir -p /app/code");
+  lines.push("");
+  lines.push("# Install gosu for dropping privileges (Cloudron convention)");
+  lines.push("RUN apt-get update && apt-get install -y gosu && rm -rf /var/lib/apt/lists/*");
   lines.push("");
   lines.push("COPY start.sh /app/code/start.sh");
   lines.push("RUN chmod +x /app/code/start.sh");
@@ -136,17 +146,14 @@ export function generateDockerfile(config) {
   // EXPOSE: always httpPort
   const exposePorts = [String(config.httpPort)];
 
-  // If not hasWebUI, also expose tcp and udp container ports
-  if (!config.hasWebUI) {
-    if (config.tcpPorts && config.tcpPorts.length > 0) {
-      for (const port of config.tcpPorts) {
-        exposePorts.push(String(port.containerPort));
-      }
+  if (config.tcpPorts && config.tcpPorts.length > 0) {
+    for (const port of config.tcpPorts) {
+      exposePorts.push(String(port.containerPort));
     }
-    if (config.udpPorts && config.udpPorts.length > 0) {
-      for (const port of config.udpPorts) {
-        exposePorts.push(`${port.containerPort}/udp`);
-      }
+  }
+  if (config.udpPorts && config.udpPorts.length > 0) {
+    for (const port of config.udpPorts) {
+      exposePorts.push(`${port.containerPort}/udp`);
     }
   }
 
@@ -159,6 +166,10 @@ export function generateDockerfile(config) {
 
 /**
  * Generates start.sh content.
+ * Fix #1/#4: use gosu for non-root execution
+ * Fix #2: minimal healthcheck handler (no filesystem exposure)
+ * Fix #3: signal handling with trap
+ * Fix #11: log guidance comments
  */
 export function generateStartSh(config) {
   const lines = [];
@@ -181,21 +192,29 @@ export function generateStartSh(config) {
   }
 
   if (config.hasWebUI) {
-    // Single process — exec placeholder
-    lines.push("# Start the application");
-    lines.push("exec /app/code/YOUR_APP_COMMAND");
+    // Single process — exec + gosu ensures SIGTERM reaches the app
+    lines.push("# Start the application (exec ensures SIGTERM is forwarded)");
+    lines.push("exec /usr/local/bin/gosu cloudron:cloudron /app/code/YOUR_APP_COMMAND");
   } else {
-    // Background service + Python mini healthcheck + wait
-    lines.push("# Start the service in the background");
-    lines.push("/app/code/YOUR_SERVICE_COMMAND &");
+    // Background service + minimal healthcheck + wait
+    lines.push("# Forward signals to child processes");
+    lines.push("trap 'kill $(jobs -p) 2>/dev/null; wait' TERM INT");
     lines.push("");
-    lines.push("# Health check endpoint");
+    lines.push("# Start the service in the background");
+    lines.push("# Ensure your service logs to stdout/stderr for Cloudron log integration");
+    lines.push("/usr/local/bin/gosu cloudron:cloudron /app/code/YOUR_SERVICE_COMMAND &");
+    lines.push("");
+    lines.push("# Minimal health check endpoint (returns 200 OK)");
     lines.push(
       `python3 -c "
 import http.server
-handler = http.server.SimpleHTTPRequestHandler
-httpd = http.server.HTTPServer(('0.0.0.0', ${config.httpPort}), handler)
-httpd.serve_forever()
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'OK')
+    def log_message(self, *a): pass
+http.server.HTTPServer(('0.0.0.0', ${config.httpPort}), H).serve_forever()
 " &`
     );
     lines.push("");
@@ -214,6 +233,7 @@ export function generateDockerignore() {
 
 /**
  * Generates README.md content for the packaged app.
+ * Fix #8: corrected cloudron install command
  */
 export function generateReadme(config) {
   const lines = [];
@@ -226,20 +246,23 @@ export function generateReadme(config) {
   lines.push("```bash");
   lines.push("cloudron login");
   lines.push("cloudron build");
-  lines.push(`cloudron install --image ${config.id}`);
+  lines.push("cloudron install");
   lines.push("```");
   lines.push("");
   lines.push("## Update");
   lines.push("");
   lines.push("```bash");
   lines.push("cloudron build");
-  lines.push(`cloudron update --app <app-id>`);
+  lines.push("cloudron update --app <app-id>");
   lines.push("```");
   lines.push("");
   lines.push("## Notes");
   lines.push("");
   lines.push(
     "- If the upstream Docker image runs as a non-root USER, you may need to adjust file permissions or switch to a root-based entrypoint."
+  );
+  lines.push(
+    "- Ensure your application logs to stdout/stderr for proper Cloudron log integration."
   );
 
   return lines.join("\n") + "\n";
