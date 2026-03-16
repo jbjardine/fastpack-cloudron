@@ -1,0 +1,17 @@
+{
+  "id": "io.fastpack.builderregistry",
+  "title": "Builder + Registry",
+  "version": "1.0.1",
+  "manifestVersion": 2,
+  "healthCheckPath": "/v2/",
+  "httpPort": 8000,
+  "description": "Combined Docker Build Service and Container Registry in a single app.",
+  "tagline": "Build and store Docker images",
+  "addons": {
+    "localstorage": {},
+    "docker": {},
+    "oidc": {
+      "loginRedirectUri": "/api/v1/login-callback"
+    }
+  }
+}
