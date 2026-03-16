@@ -149,6 +149,22 @@
       padding: 0.25rem;
     }
 
+    .service-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+      padding: 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      align-items: center;
+    }
+
+    .service-row input, .service-row select {
+      flex: 1;
+      min-width: 100px;
+    }
+
     .preview-header {
       display: flex;
       align-items: center;
@@ -508,6 +524,13 @@
       </details>
 
       <details>
+        <summary>Services (multi-process)</summary>
+        <p>Add multiple services to run inside a single Cloudron app with path-based routing.</p>
+        <div id="services-list"></div>
+        <button type="button" class="add-port-btn" id="add-service">Add Service</button>
+      </details>
+
+      <details>
         <summary>Customize ports</summary>
         <h4>TCP Ports</h4>
         <div id="tcp-ports-list"></div>
@@ -535,6 +558,7 @@
           <button class="preview-tab" data-target="dockerignore">dockerignore</button>
           <button class="preview-tab" data-target="readme">readme</button>
           <button class="preview-tab" data-target="versions">versions</button>
+          <button class="preview-tab" data-target="nginx" id="nginx-tab" style="display: none;">nginx</button>
         </div>
         <button class="copy-btn" data-copy="preview-manifest">Copy</button>
       </div>
@@ -544,6 +568,7 @@
       <div class="preview-content" data-panel="dockerignore"><pre><code id="preview-dockerignore"></code></pre></div>
       <div class="preview-content" data-panel="readme"><pre><code id="preview-readme"></code></pre></div>
       <div class="preview-content" data-panel="versions"><pre><code id="preview-versions"></code></pre></div>
+      <div class="preview-content" data-panel="nginx"><pre><code id="preview-nginx"></code></pre></div>
     </section>
 
     <footer>

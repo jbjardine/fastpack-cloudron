@@ -14,6 +14,7 @@ import {
   generateDockerfile,
   generateStartSh,
   generateDockerignore,
+  generateNginxConf,
 } from "./generators.js";
 
 const DOMAIN = "192.168.60.17.nip.io";
@@ -30,7 +31,13 @@ const TEST_CONFIGS = [
     name: "web-nosso",
     subdomain: "t1",
     appCommand: "python3 -m http.server 8000",
-    verify: (app) => httpCheck(app, 200),
+    verify: (app) => {
+      const r = verifyApp(app);
+      if (r.status !== 200) return { ok: false, detail: `HTTP ${r.status} (expected 200)` };
+      if (!r.body.includes("<")) return { ok: false, detail: "Body has no HTML content" };
+      if (/login|sso|redirect/i.test(r.body)) return { ok: false, detail: "Unexpected SSO redirect in body" };
+      return { ok: true, detail: `HTTP 200, body ${r.body.length} bytes, no SSO redirect` };
+    },
     config: {
       id: "io.fastpack.t1", title: "Test 1", version: "1.0.0",
       httpPort: 8000, healthCheckPath: "/", hasWebUI: true,
@@ -44,7 +51,12 @@ const TEST_CONFIGS = [
     name: "web-proxyauth",
     subdomain: "t2",
     appCommand: "python3 -m http.server 8000",
-    verify: (app) => httpCheck(app, 401, 302, 303),
+    verify: (app) => {
+      const r = verifyApp(app);
+      if (![401, 302, 303].includes(r.status)) return { ok: false, detail: `HTTP ${r.status} (expected 401/302/303)` };
+      const hasLogin = /login|sign.?in|auth/i.test(r.body);
+      return { ok: true, detail: `HTTP ${r.status}, login page present: ${hasLogin}` };
+    },
     config: {
       id: "io.fastpack.t2", title: "Test 2", version: "1.0.0",
       httpPort: 8000, healthCheckPath: "/", hasWebUI: true,
@@ -59,7 +71,12 @@ const TEST_CONFIGS = [
     name: "alpine-web",
     subdomain: "t3",
     appCommand: "python3 -m http.server 8000",
-    verify: (app) => httpCheck(app, 200),
+    verify: (app) => {
+      const r = verifyApp(app);
+      if (r.status !== 200) return { ok: false, detail: `HTTP ${r.status} (expected 200)` };
+      if (r.body.length === 0) return { ok: false, detail: "Body is empty" };
+      return { ok: true, detail: `HTTP 200, body ${r.body.length} bytes` };
+    },
     config: {
       id: "io.fastpack.t3", title: "Test 3", version: "1.0.0",
       httpPort: 8000, healthCheckPath: "/", hasWebUI: true,
@@ -73,7 +90,12 @@ const TEST_CONFIGS = [
     name: "tcp-mode",
     subdomain: "t4",
     appCommand: "sleep infinity",
-    verify: (app) => httpCheck(app, 200),  // healthcheck Python server responds
+    verify: (app) => {
+      const r = verifyApp(app);
+      if (r.status !== 200) return { ok: false, detail: `HTTP ${r.status} (expected 200)` };
+      if (!r.body.includes("OK")) return { ok: false, detail: `Healthcheck body "${r.body}" does not contain "OK"` };
+      return { ok: true, detail: `HTTP 200, healthcheck body: "${r.body}"` };
+    },
     config: {
       id: "io.fastpack.t4", title: "Test 4", version: "1.0.0",
       httpPort: 8080, healthCheckPath: "/", hasWebUI: false,
@@ -103,6 +125,7 @@ const TEST_CONFIGS = [
     name: "fedora",
     subdomain: "t6",
     appCommand: "python3 -m http.server 8000",
+    extraDockerLines: "RUN dnf install -y python3 && dnf clean all",
     verify: (app) => httpCheck(app, 200),
     config: {
       id: "io.fastpack.t6", title: "Test 6", version: "1.0.0",
@@ -136,13 +159,43 @@ const TEST_CONFIGS = [
     name: "busybox",
     subdomain: "t8",
     appCommand: "httpd -f -p 8000 -h /tmp",
-    verify: (app) => httpCheck(app, 200, 404),  // busybox httpd may return 404 for / but at least responds
+    verify: (app) => {
+      const r = verifyApp(app);
+      if (![200, 404].includes(r.status)) return { ok: false, detail: `HTTP ${r.status} (expected 200 or 404)` };
+      return { ok: true, detail: `HTTP ${r.status}, httpd responding, body ${r.body.length} bytes` };
+    },
     config: {
       id: "io.fastpack.t8", title: "Test 8", version: "1.0.0",
       httpPort: 8000, healthCheckPath: "/", hasWebUI: true,
       image: "busybox:latest", database: null, sso: null,
       addons: ["localstorage"], tcpPorts: [], udpPorts: [],
       author: "", tagline: "", description: "",
+    },
+  },
+  // 9. Multi-service (two Python HTTP servers behind nginx)
+  {
+    name: "multi-service",
+    subdomain: "t9",
+    appCommand: null,  // not used — services define their own commands
+    verify: (app) => {
+      // /app1 → HTTP 200 (no SSO)
+      const r1 = verifyApp(app, "/app1/");
+      if (r1.status !== 200) return { ok: false, detail: `/app1 HTTP ${r1.status} (expected 200)` };
+      // /app2 → HTTP 200 (no SSO in this test, proxyAuth needs Cloudron SSO setup)
+      const r2 = verifyApp(app, "/app2/");
+      if (r2.status !== 200) return { ok: false, detail: `/app2 HTTP ${r2.status} (expected 200)` };
+      return { ok: true, detail: `/app1 OK, /app2 OK` };
+    },
+    config: {
+      id: "io.fastpack.t9", title: "Test 9", version: "1.0.0",
+      httpPort: 8000, healthCheckPath: "/", hasWebUI: true,
+      image: "python:3-slim", database: null, sso: null,
+      addons: ["localstorage"], tcpPorts: [], udpPorts: [],
+      author: "", tagline: "", description: "",
+      services: [
+        { name: "app1", command: "python3 -m http.server 3001", internalPort: 3001, routePath: "/app1", sso: "none" },
+        { name: "app2", command: "python3 -m http.server 3002", internalPort: 3002, routePath: "/app2", sso: "none" },
+      ],
     },
   },
 ];
@@ -176,11 +229,20 @@ function step(label, fn) {
 }
 
 function httpCheck(appDomain, ...acceptCodes) {
-  const r = run("ssh", [VM_HOST,
-    `curl -sk -o /dev/null -w '%{http_code}' https://${appDomain}`]);
-  const code = parseInt(r.stdout);
-  const ok = acceptCodes.includes(code);
-  return { ok, detail: `HTTP ${code} (expected ${acceptCodes.join(" or ")})`, stdout: r.stdout, stderr: r.stderr };
+  const result = verifyApp(appDomain);
+  const ok = acceptCodes.includes(result.status);
+  return { ok, detail: `HTTP ${result.status} (expected ${acceptCodes.join(" or ")})`, stdout: String(result.status), stderr: result.stderr || "" };
+}
+
+function verifyApp(appDomain, path = "/") {
+  const url = `https://${appDomain}${path}`;
+  const statusR = run("ssh", [VM_HOST, `curl -sk -o /dev/null -w '%{http_code}' ${url}`]);
+  const bodyR = run("ssh", [VM_HOST, `curl -sk ${url}`]);
+  return {
+    status: parseInt(statusR.stdout) || 0,
+    body: bodyR.stdout || "",
+    stderr: statusR.stderr || bodyR.stderr || "",
+  };
 }
 
 async function testConfig(tc) {
@@ -195,9 +257,22 @@ async function testConfig(tc) {
     // 1. Generate
     const genResult = step("Generate", () => {
       writeFileSync(join(dir, "CloudronManifest.json"), generateManifest(tc.config));
-      writeFileSync(join(dir, "Dockerfile"), generateDockerfile(tc.config));
-      writeFileSync(join(dir, "start.sh"), patchStartSh(generateStartSh(tc.config), tc.appCommand));
+      let dockerfile = generateDockerfile(tc.config);
+      if (tc.extraDockerLines) {
+        // Insert extra lines before CMD
+        dockerfile = dockerfile.replace('CMD ["/app/code/start.sh"]',
+          tc.extraDockerLines + '\n\nCMD ["/app/code/start.sh"]');
+      }
+      writeFileSync(join(dir, "Dockerfile"), dockerfile);
+      const startSh = tc.appCommand
+        ? patchStartSh(generateStartSh(tc.config), tc.appCommand)
+        : generateStartSh(tc.config);
+      writeFileSync(join(dir, "start.sh"), startSh);
       writeFileSync(join(dir, ".dockerignore"), generateDockerignore());
+      // Generate nginx.conf for multi-service configs
+      if (tc.config.services && tc.config.services.length > 0) {
+        writeFileSync(join(dir, "nginx.conf"), generateNginxConf(tc.config));
+      }
       return { ok: true };
     });
     if (!genResult.ok) return false;

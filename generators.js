@@ -135,7 +135,9 @@ export function generateManifest(config) {
   }
 
   // SSO at root level: optionalSso when sso is null or "none"
-  if (!config.sso || config.sso === "none") {
+  // But not when multi-service SSO has proxyAuth services
+  const hasServiceSso = config.services && config.services.some((s) => s.sso === "proxyAuth");
+  if ((!config.sso || config.sso === "none") && !hasServiceSso) {
     manifest.optionalSso = true;
   }
 
@@ -167,6 +169,20 @@ export function generateManifest(config) {
     if (config.proxyauthBasicAuth) proxyOpts.basicAuth = true;
     if (config.proxyauthBearerAuth) proxyOpts.supportsBearerAuth = true;
     addons.proxyAuth = proxyOpts;
+  } else if (config.services && config.services.length > 0) {
+    // Multi-service SSO: combine per-service SSO settings
+    const ssoServices = config.services.filter((s) => s.sso === "proxyAuth");
+    const noSsoServices = config.services.filter(
+      (s) => s.sso !== "proxyAuth" && s.routePath
+    );
+    if (ssoServices.length > 0) {
+      const proxyOpts = {};
+      if (noSsoServices.length > 0) {
+        // Exclude non-SSO paths
+        proxyOpts.path = noSsoServices.map((s) => "!" + s.routePath).join(",");
+      }
+      addons.proxyAuth = proxyOpts;
+    }
   } else if (config.sso === "oidc") {
     const oidcOpts = {
       loginRedirectUri: config.oidcRedirectUri || "/auth/openid/callback",
@@ -278,12 +294,31 @@ export function generateDockerfile(config) {
       chmod +x /usr/local/bin/gosu; \\
     fi`);
   lines.push("");
+  // Install nginx for multi-service reverse proxy
+  const hasServices = config.services && config.services.length > 0;
+  if (hasServices) {
+    lines.push("# Install nginx for internal reverse proxy");
+    lines.push(`RUN set -eux; \\
+    if command -v apt-get >/dev/null 2>&1; then \\
+      apt-get update; \\
+      apt-get install -y --no-install-recommends nginx; \\
+      rm -rf /var/lib/apt/lists/*; \\
+    elif command -v apk >/dev/null 2>&1; then \\
+      apk add --no-cache nginx; \\
+    elif command -v dnf >/dev/null 2>&1; then \\
+      dnf install -y nginx && dnf clean all; \\
+    fi`);
+    lines.push("");
+    lines.push("COPY nginx.conf /app/code/nginx.conf");
+    lines.push("");
+  }
+
   lines.push("COPY start.sh /app/code/start.sh");
   lines.push("RUN chmod +x /app/code/start.sh");
   lines.push("");
 
   // Install python3 for the health-check server when no web UI
-  if (!config.hasWebUI) {
+  if (!config.hasWebUI && !hasServices) {
     lines.push("# Install python3 for health-check endpoint (TCP-only mode)");
     lines.push(`RUN set -eux; \\
     if command -v apt-get >/dev/null 2>&1; then \\
@@ -344,7 +379,25 @@ export function generateStartSh(config) {
     lines.push("");
   }
 
-  if (config.hasWebUI) {
+  const hasServices = config.services && config.services.length > 0;
+
+  if (hasServices) {
+    // Multi-service mode: start all services + nginx reverse proxy
+    lines.push("# Forward signals to all children");
+    lines.push("trap 'kill $(jobs -p) 2>/dev/null; wait' TERM INT");
+    lines.push("");
+
+    for (const svc of config.services) {
+      lines.push(`echo "Starting ${svc.name}..."`);
+      lines.push(`/usr/local/bin/gosu cloudron:cloudron ${svc.command} &`);
+      lines.push("");
+    }
+
+    lines.push("# Start nginx reverse proxy");
+    lines.push('nginx -c /app/code/nginx.conf -g "daemon off;" &');
+    lines.push("");
+    lines.push("wait");
+  } else if (config.hasWebUI) {
     // Single process — exec + gosu ensures SIGTERM reaches the app
     lines.push("# Start the application (exec ensures SIGTERM is forwarded)");
     lines.push("exec /usr/local/bin/gosu cloudron:cloudron YOUR_APP_COMMAND");
@@ -443,6 +496,14 @@ export function generateReadme(config) {
   lines.push("Push your package source to a Git repository and use the");
   lines.push("Cloudron [Docker Builder](https://docs.cloudron.io/packaging/tutorial/#build-service) app.");
   lines.push("");
+  lines.push("## Pre-flight Checks");
+  lines.push("");
+  lines.push("```bash");
+  lines.push("docker build -t my-app .");
+  lines.push("docker run --rm my-app id cloudron          # Should show uid=808");
+  lines.push('docker run --rm my-app /usr/local/bin/gosu cloudron:cloudron whoami  # Should show "cloudron"');
+  lines.push("```");
+  lines.push("");
   lines.push("## Notes");
   lines.push("");
   lines.push(
@@ -456,6 +517,64 @@ export function generateReadme(config) {
       "- This package runs in TCP-only mode. A minimal Python health-check server listens on the HTTP port so Cloudron can verify the app is running."
     );
   }
+
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * Generates nginx.conf for multi-service reverse proxy.
+ * Only used when config.services has entries with routePaths.
+ */
+export function generateNginxConf(config) {
+  if (!config.services || config.services.length === 0) return "";
+
+  const lines = [];
+  lines.push("worker_processes 1;");
+  lines.push("error_log /dev/stderr;");
+  lines.push("pid /tmp/nginx.pid;");
+  lines.push("");
+  lines.push("events { worker_connections 64; }");
+  lines.push("");
+  lines.push("http {");
+  lines.push("  access_log /dev/stdout;");
+  lines.push("");
+  lines.push("  # Writable temp paths (Cloudron read-only filesystem)");
+  lines.push("  client_body_temp_path /tmp/nginx_client_body;");
+  lines.push("  proxy_temp_path /tmp/nginx_proxy;");
+  lines.push("  fastcgi_temp_path /tmp/nginx_fastcgi;");
+  lines.push("  uwsgi_temp_path /tmp/nginx_uwsgi;");
+  lines.push("  scgi_temp_path /tmp/nginx_scgi;");
+  lines.push("");
+  lines.push("  server {");
+  lines.push(`    listen ${config.httpPort};`);
+  lines.push("");
+
+  // Services with route paths
+  const routed = config.services.filter((s) => s.routePath);
+  for (const svc of routed) {
+    const path = svc.routePath.endsWith("/") ? svc.routePath : svc.routePath + "/";
+    lines.push(`    # ${svc.name} → localhost:${svc.internalPort}`);
+    lines.push(`    location ${path} {`);
+    lines.push(`      proxy_pass http://127.0.0.1:${svc.internalPort}/;`);
+    lines.push("      proxy_set_header Host $host;");
+    lines.push("      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;");
+    lines.push("    }");
+    lines.push("");
+  }
+
+  // Default location: first routed service or first service with a port
+  const defaultSvc = routed[0] || config.services[0];
+  if (defaultSvc) {
+    lines.push("    # Default: " + defaultSvc.name);
+    lines.push("    location / {");
+    lines.push(`      proxy_pass http://127.0.0.1:${defaultSvc.internalPort};`);
+    lines.push("      proxy_set_header Host $host;");
+    lines.push("      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;");
+    lines.push("    }");
+  }
+
+  lines.push("  }");
+  lines.push("}");
 
   return lines.join("\n") + "\n";
 }

@@ -32,6 +32,7 @@
       generateDockerignore,
       generateReadme,
       generateCloudronVersions,
+      generateNginxConf,
     } from "./generators.js";
 
     const results = document.getElementById("results");
@@ -257,8 +258,7 @@
       description: "",
     };
     const proxyManifest = JSON.parse(generateManifest(proxyAuthConfig));
-    assert("proxyauth: lowercase key in manifest", proxyManifest.addons.proxyAuth !== undefined, true);
-    assert("proxyauth: no camelCase key", proxyManifest.addons.proxyAuth, undefined);
+    assert("proxyauth: key present in manifest", proxyManifest.addons.proxyAuth !== undefined, true);
     assert("proxyauth: path option", proxyManifest.addons.proxyAuth.path, "/admin");
     assert("proxyauth: basicAuth option", proxyManifest.addons.proxyAuth.basicAuth, true);
     assert("proxyauth: supportsBearerAuth option", proxyManifest.addons.proxyAuth.supportsBearerAuth, true);
@@ -833,6 +833,177 @@
     assert("versions: has version key", versions["1.0.0"] !== undefined, true);
     assertIncludes("versions: image contains id", versions["1.0.0"].image, "com.example.app");
     assertIncludes("versions: image contains version", versions["1.0.0"].image, "1.0.0");
+
+    // ========================================
+    // generateNginxConf
+    // ========================================
+    addSuite("generateNginxConf");
+
+    // No services → empty string
+    assert("no services: empty", generateNginxConf({ services: [] }), "");
+    assert("no services key: empty", generateNginxConf({}), "");
+
+    // Basic multi-service
+    const nginxConfig = {
+      httpPort: 8000,
+      services: [
+        { name: "app1", command: "node server.js", internalPort: 3001, routePath: "/app1", sso: "none" },
+        { name: "app2", command: "python3 app.py", internalPort: 3002, routePath: "/app2", sso: "proxyAuth" },
+      ],
+    };
+    const nginxConf = generateNginxConf(nginxConfig);
+    assertIncludes("nginx: listen port", nginxConf, "listen 8000");
+    assertIncludes("nginx: app1 location", nginxConf, "location /app1/");
+    assertIncludes("nginx: app1 proxy_pass", nginxConf, "proxy_pass http://127.0.0.1:3001/");
+    assertIncludes("nginx: app2 location", nginxConf, "location /app2/");
+    assertIncludes("nginx: app2 proxy_pass", nginxConf, "proxy_pass http://127.0.0.1:3002/");
+    assertIncludes("nginx: default location", nginxConf, "location / {");
+    assertIncludes("nginx: writable temp paths", nginxConf, "client_body_temp_path /tmp/");
+    assertIncludes("nginx: pid in /tmp", nginxConf, "pid /tmp/nginx.pid");
+
+    // Service without route
+    const tcpOnlyServiceConf = generateNginxConf({
+      httpPort: 8000,
+      services: [
+        { name: "mqtt", command: "mosquitto", internalPort: 1883, routePath: null, sso: "none" },
+        { name: "web", command: "node app.js", internalPort: 3000, routePath: "/web", sso: "none" },
+      ],
+    });
+    assertNotIncludes("nginx: no location for null routePath", tcpOnlyServiceConf, "location /mqtt");
+    assertIncludes("nginx: location for web service", tcpOnlyServiceConf, "location /web/");
+
+    // ========================================
+    // generateStartSh — multi-service
+    // ========================================
+    addSuite("generateStartSh — multi-service");
+
+    const multiStartConfig = {
+      httpPort: 8000,
+      hasWebUI: true,
+      addons: ["localstorage"],
+      version: "1.0.0",
+      services: [
+        { name: "app1", command: "node server.js", internalPort: 3001, routePath: "/app1", sso: "none" },
+        { name: "app2", command: "python3 app.py", internalPort: 3002, routePath: "/app2", sso: "proxyAuth" },
+      ],
+    };
+    const multiStart = generateStartSh(multiStartConfig);
+    assertIncludes("multi: starts app1", multiStart, "node server.js");
+    assertIncludes("multi: starts app2", multiStart, "python3 app.py");
+    assertIncludes("multi: starts nginx", multiStart, "nginx -c /app/code/nginx.conf");
+    assertIncludes("multi: signal trap", multiStart, "trap");
+    assertIncludes("multi: wait", multiStart, "wait");
+    assertIncludes("multi: gosu for services", multiStart, "/usr/local/bin/gosu cloudron:cloudron");
+    assertNotIncludes("multi: no YOUR_APP_COMMAND", multiStart, "YOUR_APP_COMMAND");
+
+    // ========================================
+    // generateDockerfile — multi-service
+    // ========================================
+    addSuite("generateDockerfile — multi-service");
+
+    const multiDockerConfig = {
+      image: "python:3-slim",
+      httpPort: 8000,
+      hasWebUI: true,
+      tcpPorts: [],
+      udpPorts: [],
+      services: [
+        { name: "app1", command: "python3 -m http.server 3001", internalPort: 3001, routePath: "/app1", sso: "none" },
+      ],
+    };
+    const multiDockerfile = generateDockerfile(multiDockerConfig);
+    assertIncludes("multi docker: installs nginx", multiDockerfile, "nginx");
+    assertIncludes("multi docker: copies nginx.conf", multiDockerfile, "COPY nginx.conf /app/code/nginx.conf");
+    assertNotIncludes("multi docker: no python3 healthcheck install", multiDockerfile, "Install python3");
+
+    // ========================================
+    // generateManifest — multi-service SSO
+    // ========================================
+    addSuite("generateManifest — multi-service SSO");
+
+    // Mixed SSO: one proxyAuth, one none
+    const multiSsoConfig = {
+      id: "com.example.multi",
+      title: "Multi App",
+      version: "1.0.0",
+      httpPort: 8000,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: null,
+      sso: null,
+      addons: ["localstorage"],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+      services: [
+        { name: "app1", command: "cmd1", internalPort: 3001, routePath: "/app1", sso: "proxyAuth" },
+        { name: "app2", command: "cmd2", internalPort: 3002, routePath: "/app2", sso: "none" },
+      ],
+    };
+    const multiSsoManifest = JSON.parse(generateManifest(multiSsoConfig));
+    assert("multi sso: proxyAuth addon present", multiSsoManifest.addons.proxyAuth !== undefined, true);
+    assertIncludes("multi sso: excludes /app2", JSON.stringify(multiSsoManifest.addons.proxyAuth), "!/app2");
+    assert("multi sso: no optionalSso", multiSsoManifest.optionalSso, undefined);
+
+    // All proxyAuth
+    const allSsoConfig = {
+      id: "com.example.allsso",
+      title: "All SSO",
+      version: "1.0.0",
+      httpPort: 8000,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: null,
+      sso: null,
+      addons: [],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+      services: [
+        { name: "a", command: "c", internalPort: 3001, routePath: "/a", sso: "proxyAuth" },
+        { name: "b", command: "d", internalPort: 3002, routePath: "/b", sso: "proxyAuth" },
+      ],
+    };
+    const allSsoManifest = JSON.parse(generateManifest(allSsoConfig));
+    assert("all sso: proxyAuth present", allSsoManifest.addons.proxyAuth !== undefined, true);
+    assert("all sso: no path exclusion", allSsoManifest.addons.proxyAuth.path, undefined);
+
+    // No SSO services
+    const noSsoServicesConfig = {
+      id: "com.example.nosso",
+      title: "No SSO",
+      version: "1.0.0",
+      httpPort: 8000,
+      healthCheckPath: "/",
+      hasWebUI: true,
+      database: null,
+      sso: null,
+      addons: [],
+      tcpPorts: [],
+      udpPorts: [],
+      author: "",
+      tagline: "",
+      description: "",
+      services: [
+        { name: "a", command: "c", internalPort: 3001, routePath: "/a", sso: "none" },
+      ],
+    };
+    const noSsoServicesManifest = JSON.parse(generateManifest(noSsoServicesConfig));
+    assert("no sso services: no proxyAuth addon", noSsoServicesManifest.addons.proxyAuth, undefined);
+
+    // ========================================
+    // generateReadme — pre-flight checks
+    // ========================================
+    addSuite("generateReadme — pre-flight checks");
+
+    const preflightReadme = generateReadme({ id: "com.example.test", title: "Test", hasWebUI: true });
+    assertIncludes("readme: pre-flight section", preflightReadme, "Pre-flight Checks");
+    assertIncludes("readme: id cloudron check", preflightReadme, "id cloudron");
+    assertIncludes("readme: gosu whoami check", preflightReadme, "gosu cloudron:cloudron whoami");
 
     // ========================================
     // Summary

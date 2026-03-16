@@ -10,6 +10,7 @@ import {
   generateDockerignore,
   generateReadme,
   generateCloudronVersions,
+  generateNginxConf,
 } from './generators.js';
 
 /**
@@ -162,6 +163,19 @@ function buildConfig() {
   const memoryLimitMB = parseInt(memoryLimitEl.value, 10) || 0;
   const memoryLimit = memoryLimitMB > 0 ? memoryLimitMB * 1024 * 1024 : 0;
 
+  // Collect service rows
+  const services = [];
+  const serviceRows = document.querySelectorAll('.service-row');
+  for (const row of serviceRows) {
+    services.push({
+      name: row.querySelector('.service-name').value.trim(),
+      command: row.querySelector('.service-command').value.trim(),
+      internalPort: parseInt(row.querySelector('.service-port').value, 10) || 0,
+      routePath: row.querySelector('.service-route').value.trim() || null,
+      sso: row.querySelector('.service-sso').value,
+    });
+  }
+
   // Parse comma-separated directory lists
   const parseDirs = (el) => el.value.trim().split(',').map(s => s.trim()).filter(s => s.length > 0);
 
@@ -223,6 +237,8 @@ function buildConfig() {
     sendmailValidCert: sendmailValidCertEl.checked,
     // Scheduler tasks
     schedulerTasks,
+    // Multi-service
+    services,
   };
 }
 
@@ -373,6 +389,33 @@ function validate(config) {
     });
   }
 
+  // Smart image warnings
+  const imageLower = (config.image || '').toLowerCase();
+
+  if (imageLower.includes('distroless') || imageLower.includes('scratch')) {
+    warnings.push({
+      message: 'This image has no shell. start.sh requires /bin/sh.',
+    });
+  }
+
+  if (imageLower.includes('busybox') && !config.hasWebUI) {
+    warnings.push({
+      message: 'BusyBox has no python3. TCP healthcheck will fail.',
+    });
+  }
+
+  if (config.httpPort === 80 && imageLower.includes('nginx')) {
+    warnings.push({
+      message: 'nginx needs writable /var/cache/nginx. Add runtime dirs or use a different port.',
+    });
+  }
+
+  if (/fedora|centos|rocky|amazon/.test(imageLower)) {
+    warnings.push({
+      message: 'This image uses dnf. gosu will be installed via util-linux/setpriv.',
+    });
+  }
+
   return { errors, warnings };
 }
 
@@ -430,6 +473,15 @@ function updatePreviewNow() {
     generateReadme(config);
   document.getElementById('preview-versions').textContent =
     generateCloudronVersions(config);
+
+  // nginx preview — show tab and content when services are configured
+  const hasServices = config.services && config.services.length > 0;
+  const nginxTab = document.getElementById('nginx-tab');
+  if (nginxTab) {
+    nginxTab.style.display = hasServices ? '' : 'none';
+  }
+  document.getElementById('preview-nginx').textContent =
+    hasServices ? generateNginxConf(config) : '';
 
   // Show/hide HTTP port group based on web UI selection
   toggleVisibility('http-port-group', config.hasWebUI);
@@ -513,6 +565,11 @@ async function downloadZip() {
   const descContent = generateDescription(config);
   if (descContent) {
     zip.file('DESCRIPTION.md', descContent);
+  }
+
+  // Add nginx.conf if services are configured
+  if (config.services && config.services.length > 0) {
+    zip.file('nginx.conf', generateNginxConf(config));
   }
 
   const blob = await zip.generateAsync({ type: 'blob' });
@@ -622,6 +679,72 @@ function addSchedulerTaskRow() {
 }
 
 /**
+ * Adds a service row to the services container.
+ */
+function addServiceRow() {
+  const container = document.getElementById('services-list');
+
+  const row = document.createElement('div');
+  row.className = 'service-row';
+
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'service-name';
+  nameInput.placeholder = 'Name (e.g., n8n)';
+
+  const commandInput = document.createElement('input');
+  commandInput.type = 'text';
+  commandInput.className = 'service-command';
+  commandInput.placeholder = 'Command (e.g., n8n start)';
+
+  const portInput = document.createElement('input');
+  portInput.type = 'number';
+  portInput.className = 'service-port';
+  portInput.placeholder = 'Port';
+
+  const routeInput = document.createElement('input');
+  routeInput.type = 'text';
+  routeInput.className = 'service-route';
+  routeInput.placeholder = 'Route (e.g., /n8n)';
+
+  const ssoSelect = document.createElement('select');
+  ssoSelect.className = 'service-sso';
+  const noneOpt = document.createElement('option');
+  noneOpt.value = 'none';
+  noneOpt.textContent = 'No SSO';
+  const proxyOpt = document.createElement('option');
+  proxyOpt.value = 'proxyAuth';
+  proxyOpt.textContent = 'ProxyAuth';
+  ssoSelect.appendChild(noneOpt);
+  ssoSelect.appendChild(proxyOpt);
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'remove-port';
+  removeBtn.textContent = '\u2715';
+
+  nameInput.addEventListener('input', updatePreview);
+  commandInput.addEventListener('input', updatePreview);
+  portInput.addEventListener('input', updatePreview);
+  routeInput.addEventListener('input', updatePreview);
+  ssoSelect.addEventListener('change', updatePreview);
+
+  removeBtn.addEventListener('click', function () {
+    row.remove();
+    updatePreview();
+  });
+
+  row.appendChild(nameInput);
+  row.appendChild(commandInput);
+  row.appendChild(portInput);
+  row.appendChild(routeInput);
+  row.appendChild(ssoSelect);
+  row.appendChild(removeBtn);
+
+  container.appendChild(row);
+}
+
+/**
  * Marks a field as user-edited so auto-generation skips it.
  */
 function markUserEdited(e) {
@@ -675,6 +798,11 @@ document.addEventListener('DOMContentLoaded', function () {
     addSchedulerTaskRow();
   });
 
+  // Add service button
+  document.getElementById('add-service').addEventListener('click', function () {
+    addServiceRow();
+  });
+
   // Download button
   document.getElementById('download-btn').addEventListener('click', downloadZip);
 
@@ -694,6 +822,7 @@ document.addEventListener('DOMContentLoaded', function () {
     dockerignore: 'preview-dockerignore',
     readme: 'preview-readme',
     versions: 'preview-versions',
+    nginx: 'preview-nginx',
   };
 
   // Preview tab switching
