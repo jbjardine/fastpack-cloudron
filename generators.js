@@ -265,7 +265,9 @@ export function generateDockerfile(config) {
   lines.push("");
   lines.push("# Create the cloudron user (uid 808) used by the Cloudron runtime");
   lines.push(`RUN set -eux; \\
-    if command -v groupadd >/dev/null 2>&1; then \\
+    if id cloudron >/dev/null 2>&1; then \\
+      echo "cloudron user already exists"; \\
+    elif command -v groupadd >/dev/null 2>&1; then \\
       groupadd -r -g 808 cloudron; \\
       useradd -r -u 808 -g 808 -d /home/cloudron -m cloudron; \\
     elif command -v addgroup >/dev/null 2>&1; then \\
