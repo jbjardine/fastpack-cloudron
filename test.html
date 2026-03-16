@@ -257,11 +257,11 @@
       description: "",
     };
     const proxyManifest = JSON.parse(generateManifest(proxyAuthConfig));
-    assert("proxyauth: lowercase key in manifest", proxyManifest.addons.proxyauth !== undefined, true);
+    assert("proxyauth: lowercase key in manifest", proxyManifest.addons.proxyAuth !== undefined, true);
     assert("proxyauth: no camelCase key", proxyManifest.addons.proxyAuth, undefined);
-    assert("proxyauth: path option", proxyManifest.addons.proxyauth.path, "/admin");
-    assert("proxyauth: basicAuth option", proxyManifest.addons.proxyauth.basicAuth, true);
-    assert("proxyauth: supportsBearerAuth option", proxyManifest.addons.proxyauth.supportsBearerAuth, true);
+    assert("proxyauth: path option", proxyManifest.addons.proxyAuth.path, "/admin");
+    assert("proxyauth: basicAuth option", proxyManifest.addons.proxyAuth.basicAuth, true);
+    assert("proxyauth: supportsBearerAuth option", proxyManifest.addons.proxyAuth.supportsBearerAuth, true);
 
     // ProxyAuth without options
     const proxyNoOptsConfig = {
@@ -281,7 +281,7 @@
       description: "",
     };
     const proxyNoOptsManifest = JSON.parse(generateManifest(proxyNoOptsConfig));
-    assert("proxyauth no opts: empty object", JSON.stringify(proxyNoOptsManifest.addons.proxyauth), "{}");
+    assert("proxyauth no opts: empty object", JSON.stringify(proxyNoOptsManifest.addons.proxyAuth), "{}");
 
     // LDAP config
     const ldapConfig = {

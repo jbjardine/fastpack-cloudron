@@ -166,7 +166,7 @@ export function generateManifest(config) {
     if (config.proxyauthPath) proxyOpts.path = config.proxyauthPath;
     if (config.proxyauthBasicAuth) proxyOpts.basicAuth = true;
     if (config.proxyauthBearerAuth) proxyOpts.supportsBearerAuth = true;
-    addons.proxyauth = proxyOpts;
+    addons.proxyAuth = proxyOpts;
   } else if (config.sso === "oidc") {
     const oidcOpts = {
       loginRedirectUri: config.oidcRedirectUri || "/auth/openid/callback",
@@ -211,6 +211,7 @@ export function generateManifest(config) {
     for (const port of config.tcpPorts) {
       tcpPortsObj[port.name] = {
         title: port.title,
+        description: port.description || port.title + " port",
         containerPort: port.containerPort,
         defaultValue: port.defaultValue,
       };
@@ -224,6 +225,7 @@ export function generateManifest(config) {
     for (const port of config.udpPorts) {
       udpPortsObj[port.name] = {
         title: port.title,
+        description: port.description || port.title + " port",
         containerPort: port.containerPort,
         defaultValue: port.defaultValue,
       };
@@ -265,6 +267,10 @@ export function generateDockerfile(config) {
     elif command -v apk >/dev/null 2>&1; then \\
       apk add --no-cache su-exec; \\
       ln -sf /sbin/su-exec /usr/local/bin/gosu; \\
+    elif command -v dnf >/dev/null 2>&1; then \\
+      dnf install -y util-linux && dnf clean all; \\
+      printf '#!/bin/sh\\nUSER=$(echo \"$1\" | cut -d: -f1); shift\\nexec setpriv --reuid=\"$USER\" --regid=\"$USER\" --init-groups \"$@\"\\n' > /usr/local/bin/gosu; \\
+      chmod +x /usr/local/bin/gosu; \\
     else \\
       echo \"No supported package manager found; creating a gosu shim using su\"; \\
       mkdir -p /usr/local/bin; \\
