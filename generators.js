@@ -260,6 +260,16 @@ export function generateManifest(config) {
 export function generateDockerfile(config) {
   const lines = [];
   lines.push(`FROM ${config.image}`);
+
+  // Copy files from external images (multi-stage)
+  if (config.copyFrom && config.copyFrom.length > 0) {
+    lines.push("");
+    lines.push("# Copy files from external images");
+    for (const cf of config.copyFrom) {
+      lines.push(`COPY --from=${cf.image} ${cf.src} ${cf.dest}`);
+    }
+  }
+
   lines.push("");
   lines.push("RUN mkdir -p /app/code");
   lines.push("");

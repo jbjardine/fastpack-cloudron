@@ -997,6 +997,60 @@
     assert("no sso services: no proxyAuth addon", noSsoServicesManifest.addons.proxyAuth, undefined);
 
     // ========================================
+    // generateDockerfile — COPY --from= (multi-stage)
+    // ========================================
+    addSuite("generateDockerfile — COPY --from=");
+
+    // Empty copyFrom → no COPY --from= lines
+    const noCopyFromConfig = {
+      image: "nginx:latest",
+      httpPort: 8080,
+      hasWebUI: true,
+      tcpPorts: [],
+      udpPorts: [],
+      copyFrom: [],
+    };
+    const noCopyFromDockerfile = generateDockerfile(noCopyFromConfig);
+    assertNotIncludes("no copyFrom: no COPY --from=", noCopyFromDockerfile, "COPY --from=");
+
+    // Single copyFrom entry
+    const singleCopyFromConfig = {
+      image: "node:18",
+      httpPort: 8080,
+      hasWebUI: true,
+      tcpPorts: [],
+      udpPorts: [],
+      copyFrom: [{ image: "registry:2", src: "/bin/registry", dest: "/usr/local/bin/registry" }],
+    };
+    const singleCopyFromDockerfile = generateDockerfile(singleCopyFromConfig);
+    assertIncludes("single copyFrom: has COPY --from=", singleCopyFromDockerfile, "COPY --from=registry:2 /bin/registry /usr/local/bin/registry");
+    assertIncludes("single copyFrom: comment", singleCopyFromDockerfile, "Copy files from external images");
+
+    // Multiple copyFrom entries
+    const multiCopyFromConfig = {
+      image: "ubuntu:22.04",
+      httpPort: 8080,
+      hasWebUI: true,
+      tcpPorts: [],
+      udpPorts: [],
+      copyFrom: [
+        { image: "registry:2", src: "/bin/registry", dest: "/usr/local/bin/registry" },
+        { image: "golang:1.21", src: "/usr/local/go/bin/go", dest: "/usr/local/bin/go" },
+      ],
+    };
+    const multiCopyFromDockerfile = generateDockerfile(multiCopyFromConfig);
+    assertIncludes("multi copyFrom: first entry", multiCopyFromDockerfile, "COPY --from=registry:2 /bin/registry /usr/local/bin/registry");
+    assertIncludes("multi copyFrom: second entry", multiCopyFromDockerfile, "COPY --from=golang:1.21 /usr/local/go/bin/go /usr/local/bin/go");
+
+    // COPY --from= appears after FROM, before RUN mkdir
+    const copyFromOrder = multiCopyFromDockerfile;
+    const fromIdx = copyFromOrder.indexOf("FROM ubuntu:22.04");
+    const copyIdx = copyFromOrder.indexOf("COPY --from=registry:2");
+    const mkdirIdx = copyFromOrder.indexOf("RUN mkdir -p /app/code");
+    assert("copyFrom: after FROM", fromIdx < copyIdx, true);
+    assert("copyFrom: before mkdir", copyIdx < mkdirIdx, true);
+
+    // ========================================
     // generateDeploySh
     // ========================================
     addSuite("generateDeploySh");

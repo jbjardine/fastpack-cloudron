@@ -165,6 +165,17 @@ function buildConfig() {
   const memoryLimitMB = parseInt(memoryLimitEl.value, 10) || 0;
   const memoryLimit = memoryLimitMB > 0 ? memoryLimitMB * 1024 * 1024 : 0;
 
+  // Collect copy-from rows (multi-stage COPY --from=)
+  const copyFrom = [];
+  const copyFromRows = document.querySelectorAll('.copy-from-row');
+  for (const row of copyFromRows) {
+    copyFrom.push({
+      image: row.querySelector('.copy-from-image').value.trim(),
+      src: row.querySelector('.copy-from-src').value.trim(),
+      dest: row.querySelector('.copy-from-dest').value.trim(),
+    });
+  }
+
   // Collect service rows
   const services = [];
   const serviceRows = document.querySelectorAll('.service-row');
@@ -239,6 +250,8 @@ function buildConfig() {
     sendmailValidCert: sendmailValidCertEl.checked,
     // Scheduler tasks
     schedulerTasks,
+    // Copy from image (multi-stage)
+    copyFrom: copyFrom.filter(cf => cf.image && cf.src && cf.dest),
     // Multi-service
     services,
   };
@@ -686,6 +699,52 @@ function addSchedulerTaskRow() {
 }
 
 /**
+ * Adds a copy-from row (COPY --from= multi-stage source).
+ */
+function addCopyFromRow() {
+  const container = document.getElementById('copy-from-list');
+
+  const row = document.createElement('div');
+  row.className = 'copy-from-row service-row';
+
+  const imageInput = document.createElement('input');
+  imageInput.type = 'text';
+  imageInput.className = 'copy-from-image';
+  imageInput.placeholder = 'Image (e.g., registry:2)';
+
+  const srcInput = document.createElement('input');
+  srcInput.type = 'text';
+  srcInput.className = 'copy-from-src';
+  srcInput.placeholder = 'Source path (e.g., /bin/registry)';
+
+  const destInput = document.createElement('input');
+  destInput.type = 'text';
+  destInput.className = 'copy-from-dest';
+  destInput.placeholder = 'Dest path (e.g., /usr/local/bin/registry)';
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'remove-port';
+  removeBtn.textContent = '\u2715';
+
+  imageInput.addEventListener('input', updatePreview);
+  srcInput.addEventListener('input', updatePreview);
+  destInput.addEventListener('input', updatePreview);
+
+  removeBtn.addEventListener('click', function () {
+    row.remove();
+    updatePreview();
+  });
+
+  row.appendChild(imageInput);
+  row.appendChild(srcInput);
+  row.appendChild(destInput);
+  row.appendChild(removeBtn);
+
+  container.appendChild(row);
+}
+
+/**
  * Adds a service row to the services container.
  */
 function addServiceRow() {
@@ -803,6 +862,11 @@ document.addEventListener('DOMContentLoaded', function () {
   // Add scheduler task button
   document.getElementById('add-scheduler-task').addEventListener('click', function () {
     addSchedulerTaskRow();
+  });
+
+  // Add copy-from button
+  document.getElementById('add-copy-from').addEventListener('click', function () {
+    addCopyFromRow();
   });
 
   // Add service button
