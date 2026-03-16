@@ -169,8 +169,8 @@ export function generateManifest(config) {
     if (config.proxyauthBasicAuth) proxyOpts.basicAuth = true;
     if (config.proxyauthBearerAuth) proxyOpts.supportsBearerAuth = true;
     addons.proxyAuth = proxyOpts;
-  } else if (config.services && config.services.length > 0) {
-    // Multi-service SSO: combine per-service SSO settings
+  } else if (!config.sso && config.services && config.services.length > 0) {
+    // Multi-service SSO: combine per-service SSO settings (only when no global SSO)
     const ssoServices = config.services.filter((s) => s.sso === "proxyAuth");
     const noSsoServices = config.services.filter(
       (s) => s.sso !== "proxyAuth" && s.routePath
