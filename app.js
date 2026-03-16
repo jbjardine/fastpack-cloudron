@@ -11,6 +11,8 @@ import {
   generateReadme,
   generateCloudronVersions,
   generateNginxConf,
+  generateDeploySh,
+  generateDeployCmd,
 } from './generators.js';
 
 /**
@@ -571,6 +573,11 @@ async function downloadZip() {
   if (config.services && config.services.length > 0) {
     zip.file('nginx.conf', generateNginxConf(config));
   }
+
+  // Add cross-platform deploy script (Node.js — works on Windows, Linux, Mac)
+  zip.file('deploy.js', generateDeploySh());
+  // Add Windows double-click launcher
+  zip.file('deploy.cmd', generateDeployCmd());
 
   const blob = await zip.generateAsync({ type: 'blob' });
   const filename = `${sanitizeImageName(config.image) || 'cloudron-app'}-cloudron.zip`;

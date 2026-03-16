@@ -522,6 +522,76 @@ export function generateReadme(config) {
 }
 
 /**
+ * Generates deploy.js — cross-platform deploy script (Windows + Linux + Mac).
+ * Uses Node.js (always available since cloudron CLI requires it).
+ * Checks prerequisites (CLI, login, Build Service) then builds and installs/updates.
+ * Note: execSync is safe here — all commands are hardcoded strings, no user input interpolation.
+ * The only dynamic value (appDomain) is passed as a separate argument via execFileSync.
+ */
+export function generateDeploySh() {
+  return `#!/usr/bin/env node
+"use strict";
+var spawnSync = require("child_process").spawnSync;
+// shell:true needed on Windows where npm globals are .cmd scripts
+var opts = { shell: true };
+
+function run(cmd, args) {
+  console.log("  > " + cmd + " " + args.join(" "));
+  var r = spawnSync(cmd, args, Object.assign({ stdio: "inherit" }, opts));
+  if (r.status !== 0) process.exit(r.status || 1);
+}
+
+function check(cmd, args) {
+  var r = spawnSync(cmd, args, Object.assign({ stdio: "ignore" }, opts));
+  return r.status === 0;
+}
+
+console.log("=== FastPackCloudron Deploy ===\\n");
+
+if (!check("cloudron", ["--version"])) {
+  console.error("Error: cloudron CLI not found.\\nInstall it with: npm install -g cloudron");
+  process.exit(1);
+}
+
+if (!check("cloudron", ["list"])) {
+  console.error("Error: not logged in to Cloudron.\\nRun: cloudron login");
+  process.exit(1);
+}
+
+if (!check("cloudron", ["build", "info"])) {
+  console.error("Error: Build Service not configured.\\n");
+  console.error("1. Install the Docker Builder app on your Cloudron");
+  console.error("2. Run: cloudron build login\\n");
+  console.error("No Docker or registry needed \\u2014 the Build Service handles everything.");
+  process.exit(1);
+}
+console.log("Build Service OK.\\n");
+
+console.log("Building image...");
+run("cloudron", ["build"]);
+
+var appDomain = process.argv[2];
+if (appDomain) {
+  console.log("\\nUpdating app " + appDomain + "...");
+  run("cloudron", ["update", "--app", appDomain]);
+} else {
+  console.log("\\nInstalling app...");
+  run("cloudron", ["install"]);
+}
+
+console.log("\\nDone!");
+`;
+}
+
+/**
+ * Generates deploy.cmd — Windows double-click launcher for deploy.js.
+ * Keeps the window open after execution so the user can see the output.
+ */
+export function generateDeployCmd() {
+  return '@echo off\r\nnode "%~dp0deploy.js" %*\r\npause\r\n';
+}
+
+/**
  * Generates nginx.conf for multi-service reverse proxy.
  * Only used when config.services has entries with routePaths.
  */

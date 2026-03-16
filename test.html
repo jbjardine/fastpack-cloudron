@@ -33,6 +33,7 @@
       generateReadme,
       generateCloudronVersions,
       generateNginxConf,
+      generateDeploySh,
     } from "./generators.js";
 
     const results = document.getElementById("results");
@@ -994,6 +995,24 @@
     };
     const noSsoServicesManifest = JSON.parse(generateManifest(noSsoServicesConfig));
     assert("no sso services: no proxyAuth addon", noSsoServicesManifest.addons.proxyAuth, undefined);
+
+    // ========================================
+    // generateDeploySh
+    // ========================================
+    addSuite("generateDeploySh");
+
+    const deployScript = generateDeploySh();
+    assertIncludes("deploy: node shebang", deployScript, "#!/usr/bin/env node");
+    assertIncludes("deploy: checks cloudron CLI", deployScript, '"cloudron", ["--version"]');
+    assertIncludes("deploy: checks login", deployScript, '"cloudron", ["list"]');
+    assertIncludes("deploy: checks Build Service", deployScript, '"cloudron", ["build", "info"]');
+    assertIncludes("deploy: npm install hint", deployScript, "npm install -g cloudron");
+    assertIncludes("deploy: cloudron login hint", deployScript, "cloudron login");
+    assertIncludes("deploy: build login hint", deployScript, "cloudron build login");
+    assertIncludes("deploy: cloudron build", deployScript, '"cloudron", ["build"]');
+    assertIncludes("deploy: cloudron install", deployScript, '"cloudron", ["install"]');
+    assertIncludes("deploy: cloudron update", deployScript, '"cloudron", ["update"');
+    assertIncludes("deploy: update uses --app with arg", deployScript, '"--app", appDomain');
 
     // ========================================
     // generateReadme — pre-flight checks
