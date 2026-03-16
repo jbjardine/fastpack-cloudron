@@ -1009,10 +1009,13 @@
     assertIncludes("deploy: npm install hint", deployScript, "npm install -g cloudron");
     assertIncludes("deploy: cloudron login hint", deployScript, "cloudron login");
     assertIncludes("deploy: build login hint", deployScript, "cloudron build login");
-    assertIncludes("deploy: cloudron build", deployScript, '"cloudron", ["build"]');
+    assertIncludes("deploy: cloudron build with repo", deployScript, '"cloudron", ["build", "--repository", repo]');
     assertIncludes("deploy: cloudron install", deployScript, '"cloudron", ["install"]');
     assertIncludes("deploy: cloudron update", deployScript, '"cloudron", ["update"');
     assertIncludes("deploy: update uses --app with arg", deployScript, '"--app", appDomain');
+    assertIncludes("deploy: saves config", deployScript, ".deploy-config.json");
+    assertIncludes("deploy: asks for registry", deployScript, "Docker repository URL");
+    assertIncludes("deploy: shows examples", deployScript, "registry.yourdomain.com");
 
     // ========================================
     // generateReadme — pre-flight checks

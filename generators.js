@@ -532,8 +532,13 @@ export function generateDeploySh() {
   return `#!/usr/bin/env node
 "use strict";
 var spawnSync = require("child_process").spawnSync;
+var fs = require("fs");
+var path = require("path");
+var readline = require("readline");
+
 // shell:true needed on Windows where npm globals are .cmd scripts
 var opts = { shell: true };
+var configFile = path.join(__dirname, ".deploy-config.json");
 
 function run(cmd, args) {
   console.log("  > " + cmd + " " + args.join(" "));
@@ -546,40 +551,92 @@ function check(cmd, args) {
   return r.status === 0;
 }
 
-console.log("=== FastPackCloudron Deploy ===\\n");
-
-if (!check("cloudron", ["--version"])) {
-  console.error("Error: cloudron CLI not found.\\nInstall it with: npm install -g cloudron");
-  process.exit(1);
+function loadConfig() {
+  try { return JSON.parse(fs.readFileSync(configFile, "utf8")); } catch(e) { return {}; }
 }
 
-if (!check("cloudron", ["list"])) {
-  console.error("Error: not logged in to Cloudron.\\nRun: cloudron login");
-  process.exit(1);
+function saveConfig(cfg) {
+  fs.writeFileSync(configFile, JSON.stringify(cfg, null, 2));
 }
 
-if (!check("cloudron", ["build", "info"])) {
-  console.error("Error: Build Service not configured.\\n");
-  console.error("1. Install the Docker Builder app on your Cloudron");
-  console.error("2. Run: cloudron build login\\n");
-  console.error("No Docker or registry needed \\u2014 the Build Service handles everything.");
-  process.exit(1);
-}
-console.log("Build Service OK.\\n");
-
-console.log("Building image...");
-run("cloudron", ["build"]);
-
-var appDomain = process.argv[2];
-if (appDomain) {
-  console.log("\\nUpdating app " + appDomain + "...");
-  run("cloudron", ["update", "--app", appDomain]);
-} else {
-  console.log("\\nInstalling app...");
-  run("cloudron", ["install"]);
+function ask(question) {
+  return new Promise(function(resolve) {
+    var rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(question, function(answer) { rl.close(); resolve(answer.trim()); });
+  });
 }
 
-console.log("\\nDone!");
+async function main() {
+  console.log("=== FastPackCloudron Deploy ===\\n");
+
+  // 1. Check cloudron CLI
+  if (!check("cloudron", ["--version"])) {
+    console.error("Error: cloudron CLI not found.\\nInstall it with: npm install -g cloudron");
+    process.exit(1);
+  }
+
+  // 2. Check login
+  if (!check("cloudron", ["list"])) {
+    console.error("Error: not logged in to Cloudron.\\nRun: cloudron login");
+    process.exit(1);
+  }
+
+  // 3. Check Build Service
+  if (!check("cloudron", ["build", "info"])) {
+    console.error("Error: Build Service not configured.\\n");
+    console.error("1. Install the Docker Builder app on your Cloudron");
+    console.error("2. Run: cloudron build login\\n");
+    console.error("No Docker or registry needed \\u2014 the Build Service handles everything.");
+    process.exit(1);
+  }
+  console.log("Build Service OK.");
+
+  // 4. Get or ask for Docker repository
+  var cfg = loadConfig();
+  var repo = cfg.repository;
+  if (!repo) {
+    console.log("\\nA Docker registry is needed to store the built image.");
+    console.log("Examples:");
+    console.log("  - Cloudron Registry: registry.yourdomain.com/appname");
+    console.log("  - Docker Hub:        docker.io/username/appname\\n");
+    repo = await ask("Docker repository URL: ");
+    if (!repo) {
+      console.error("No repository provided. Aborting.");
+      process.exit(1);
+    }
+    cfg.repository = repo;
+    saveConfig(cfg);
+    console.log("Saved to .deploy-config.json (won't ask again).\\n");
+  } else {
+    console.log("Registry: " + repo + " (from .deploy-config.json)\\n");
+  }
+
+  // 5. Init git if needed (cloudron build requires a git repo)
+  if (!fs.existsSync(path.join(__dirname, ".git"))) {
+    console.log("Initializing git repo (required by cloudron build)...");
+    run("git", ["init"]);
+    run("git", ["add", "-A"]);
+    run("git", ["commit", "-m", "Initial package"]);
+  }
+
+  // 6. Build
+  console.log("Building image...");
+  run("cloudron", ["build", "--repository", repo]);
+
+  // 7. Install or update
+  var appDomain = process.argv[2];
+  if (appDomain) {
+    console.log("\\nUpdating app " + appDomain + "...");
+    run("cloudron", ["update", "--app", appDomain]);
+  } else {
+    console.log("\\nInstalling app...");
+    run("cloudron", ["install"]);
+  }
+
+  console.log("\\nDone!");
+}
+
+main();
 `;
 }
 
@@ -588,7 +645,7 @@ console.log("\\nDone!");
  * Keeps the window open after execution so the user can see the output.
  */
 export function generateDeployCmd() {
-  return '@echo off\r\nnode "%~dp0deploy.js" %*\r\npause\r\n';
+  return '@echo off\r\nnode --no-deprecation "%~dp0deploy.js" %*\r\npause\r\n';
 }
 
 /**
