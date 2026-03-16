@@ -675,6 +675,9 @@
     assertIncludes("web: gosu apk fallback", webDockerfile, "apk add --no-cache su-exec");
     assertIncludes("web: gosu shim uses su", webDockerfile, "exec su -s /bin/sh");
     assertIncludes("web: mkdir /app/code", webDockerfile, "mkdir -p /app/code");
+    assertIncludes("web: creates cloudron user (groupadd)", webDockerfile, "groupadd");
+    assertIncludes("web: creates cloudron user (useradd)", webDockerfile, "useradd");
+    assertIncludes("web: cloudron uid 808", webDockerfile, "808");
     assertNotIncludes("web: no mkdir /app/data", webDockerfile, "/app/data");
     assertNotIncludes("web: no python3 install for web mode", webDockerfile, "Install python3");
 
@@ -726,7 +729,7 @@
     };
     const webStart = generateStartSh(webStartConfig);
     assertIncludes("web: shebang", webStart, "#!/bin/sh");
-    assertIncludes("web: exec with gosu", webStart, "exec /usr/local/bin/gosu cloudron:cloudron");
+    assertIncludes("web: exec with gosu", webStart, "exec /usr/local/bin/gosu cloudron:cloudron YOUR_APP_COMMAND");
     assertNotIncludes("web: no python", webStart, "python");
     assertIncludes("web: chown with localstorage", webStart, "chown");
     assertIncludes("web: initialized guard", webStart, ".initialized");

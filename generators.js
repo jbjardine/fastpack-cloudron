@@ -245,12 +245,23 @@ export function generateDockerfile(config) {
   lines.push("");
   lines.push("RUN mkdir -p /app/code");
   lines.push("");
+  lines.push("# Create the cloudron user (uid 808) used by the Cloudron runtime");
+  lines.push(`RUN set -eux; \\
+    if command -v groupadd >/dev/null 2>&1; then \\
+      groupadd -r -g 808 cloudron; \\
+      useradd -r -u 808 -g 808 -d /home/cloudron -m cloudron; \\
+    elif command -v addgroup >/dev/null 2>&1; then \\
+      addgroup -g 808 -S cloudron; \\
+      adduser -u 808 -S -G cloudron -h /home/cloudron cloudron; \\
+    fi`);
+  lines.push("");
   lines.push("# Install gosu (or su-exec fallback) only when the base image supports it");
   lines.push(`RUN set -eux; \\
     if command -v apt-get >/dev/null 2>&1; then \\
       apt-get update; \\
       apt-get install -y --no-install-recommends gosu; \\
       rm -rf /var/lib/apt/lists/*; \\
+      ln -sf /usr/sbin/gosu /usr/local/bin/gosu 2>/dev/null || true; \\
     elif command -v apk >/dev/null 2>&1; then \\
       apk add --no-cache su-exec; \\
       ln -sf /sbin/su-exec /usr/local/bin/gosu; \\
@@ -330,7 +341,7 @@ export function generateStartSh(config) {
   if (config.hasWebUI) {
     // Single process — exec + gosu ensures SIGTERM reaches the app
     lines.push("# Start the application (exec ensures SIGTERM is forwarded)");
-    lines.push("exec /usr/local/bin/gosu cloudron:cloudron /app/code/YOUR_APP_COMMAND");
+    lines.push("exec /usr/local/bin/gosu cloudron:cloudron YOUR_APP_COMMAND");
   } else {
     // Background service + minimal healthcheck + wait
     lines.push("# Forward signals to child processes");
@@ -338,7 +349,7 @@ export function generateStartSh(config) {
     lines.push("");
     lines.push("# Start the service in the background");
     lines.push("# Ensure your service logs to stdout/stderr for Cloudron log integration");
-    lines.push("/usr/local/bin/gosu cloudron:cloudron /app/code/YOUR_SERVICE_COMMAND &");
+    lines.push("/usr/local/bin/gosu cloudron:cloudron YOUR_SERVICE_COMMAND &");
     lines.push("");
     lines.push("# Minimal health check endpoint (returns 200 OK)");
     lines.push(
