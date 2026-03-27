@@ -615,6 +615,7 @@ function copyPreview(panelId) {
  * Validates, builds the ZIP, and triggers download.
  */
 async function downloadZip() {
+  const btn = document.getElementById('download-btn');
   const config = buildConfig();
   const result = validate(config);
 
@@ -632,34 +633,45 @@ async function downloadZip() {
     return;
   }
 
-  // Build ZIP using JSZip (loaded as global from CDN)
-  const zip = new JSZip();
-  zip.file('CloudronManifest.json', generateManifest(config));
-  zip.file('Dockerfile', generateDockerfile(config));
-  zip.file('start.sh', generateStartSh(config));
-  zip.file('.dockerignore', generateDockerignore());
-  zip.file('README.md', generateReadme(config));
-  zip.file('CloudronVersions.json', generateCloudronVersions(config));
+  // Disable button during ZIP generation
+  btn.disabled = true;
+  btn.setAttribute('aria-busy', 'true');
+  btn.textContent = 'Generating...';
 
-  // Add DESCRIPTION.md if description is provided
-  const descContent = generateDescription(config);
-  if (descContent) {
-    zip.file('DESCRIPTION.md', descContent);
+  try {
+    // Build ZIP using JSZip (loaded as global from CDN)
+    const zip = new JSZip();
+    zip.file('CloudronManifest.json', generateManifest(config));
+    zip.file('Dockerfile', generateDockerfile(config));
+    zip.file('start.sh', generateStartSh(config));
+    zip.file('.dockerignore', generateDockerignore());
+    zip.file('README.md', generateReadme(config));
+    zip.file('CloudronVersions.json', generateCloudronVersions(config));
+
+    // Add DESCRIPTION.md if description is provided
+    const descContent = generateDescription(config);
+    if (descContent) {
+      zip.file('DESCRIPTION.md', descContent);
+    }
+
+    // Add nginx.conf if services are configured
+    if (config.services && config.services.length > 0) {
+      zip.file('nginx.conf', generateNginxConf(config));
+    }
+
+    // Add cross-platform deploy script (Node.js — works on Windows, Linux, Mac)
+    zip.file('deploy.js', generateDeploySh());
+    // Add Windows double-click launcher
+    zip.file('deploy.cmd', generateDeployCmd());
+
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const filename = `${sanitizeImageName(config.image) || 'cloudron-app'}-cloudron.zip`;
+    saveAs(blob, filename);
+  } finally {
+    btn.disabled = false;
+    btn.removeAttribute('aria-busy');
+    btn.textContent = 'Download ZIP';
   }
-
-  // Add nginx.conf if services are configured
-  if (config.services && config.services.length > 0) {
-    zip.file('nginx.conf', generateNginxConf(config));
-  }
-
-  // Add cross-platform deploy script (Node.js — works on Windows, Linux, Mac)
-  zip.file('deploy.js', generateDeploySh());
-  // Add Windows double-click launcher
-  zip.file('deploy.cmd', generateDeployCmd());
-
-  const blob = await zip.generateAsync({ type: 'blob' });
-  const filename = `${sanitizeImageName(config.image) || 'cloudron-app'}-cloudron.zip`;
-  saveAs(blob, filename);
 }
 
 /**
@@ -961,33 +973,60 @@ document.addEventListener('DOMContentLoaded', function () {
     nginx: 'preview-nginx',
   };
 
-  // Preview tab switching
+  // Preview tab switching (ARIA tabs pattern with arrow key navigation)
   const tabs = document.querySelectorAll('.preview-tab');
   const copyBtn = document.querySelector('.copy-btn');
+
+  function activateTab(tab) {
+    // Deactivate all tabs
+    for (const t of tabs) {
+      t.classList.remove('active');
+      t.setAttribute('aria-selected', 'false');
+      t.setAttribute('tabindex', '-1');
+    }
+    // Activate selected tab
+    tab.classList.add('active');
+    tab.setAttribute('aria-selected', 'true');
+    tab.setAttribute('tabindex', '0');
+    tab.focus();
+
+    // Toggle preview content panels
+    const target = tab.dataset.target;
+    const panels = document.querySelectorAll('.preview-content');
+    for (const panel of panels) {
+      if (panel.dataset.panel === target) {
+        panel.classList.add('active');
+        panel.removeAttribute('hidden');
+      } else {
+        panel.classList.remove('active');
+        panel.setAttribute('hidden', '');
+      }
+    }
+
+    // Update copy button target
+    if (copyBtn && tabToCopyId[target]) {
+      copyBtn.dataset.copy = tabToCopyId[target];
+      copyBtn.textContent = 'Copy';
+    }
+  }
+
   for (const tab of tabs) {
     tab.addEventListener('click', function () {
-      // Remove active from all tabs
-      for (const t of tabs) {
-        t.classList.remove('active');
-      }
-      // Add active to clicked tab
-      tab.classList.add('active');
+      activateTab(tab);
+    });
 
-      // Toggle preview content panels
-      const target = tab.dataset.target;
-      const panels = document.querySelectorAll('.preview-content');
-      for (const panel of panels) {
-        if (panel.dataset.panel === target) {
-          panel.classList.add('active');
-        } else {
-          panel.classList.remove('active');
-        }
-      }
-
-      // Update copy button target
-      if (copyBtn && tabToCopyId[target]) {
-        copyBtn.dataset.copy = tabToCopyId[target];
-        copyBtn.textContent = 'Copy';
+    // Arrow key navigation within tablist
+    tab.addEventListener('keydown', function (e) {
+      const visibleTabs = Array.from(tabs).filter(t => t.style.display !== 'none');
+      const idx = visibleTabs.indexOf(tab);
+      let newIdx = -1;
+      if (e.key === 'ArrowRight') newIdx = (idx + 1) % visibleTabs.length;
+      else if (e.key === 'ArrowLeft') newIdx = (idx - 1 + visibleTabs.length) % visibleTabs.length;
+      else if (e.key === 'Home') newIdx = 0;
+      else if (e.key === 'End') newIdx = visibleTabs.length - 1;
+      if (newIdx >= 0) {
+        e.preventDefault();
+        activateTab(visibleTabs[newIdx]);
       }
     });
   }

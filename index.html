@@ -245,6 +245,57 @@
       margin-bottom: 0.5rem;
     }
 
+    /* Focus indicators (WCAG 2.4.7) */
+    input:focus-visible, select:focus-visible, textarea:focus-visible,
+    button:focus-visible, summary:focus-visible, [role="tab"]:focus-visible {
+      outline: 3px solid var(--primary);
+      outline-offset: 2px;
+    }
+
+    #download-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    /* Dark mode (WCAG 1.4.1) */
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --primary: #4da6ff;
+        --primary-hover: #3d96f0;
+        --bg: #1a1a2e;
+        --card-bg: #252540;
+        --text: #e0e0e0;
+        --border: #444;
+        --error: #f56565;
+        --warning: #9a4e03;
+        --success: #48bb78;
+      }
+      input, select, textarea {
+        background: #2d2d4a;
+        color: #e0e0e0;
+        border-color: #555;
+      }
+      details { background: var(--card-bg); }
+      pre { background: #0d0d1a; color: #d4d4d4; }
+      .warning { background: #3d2e00; }
+      .error { background: #3a1010; }
+      .copy-btn { background: var(--card-bg); color: var(--text); }
+      .add-port-btn { color: var(--text); }
+      .service-row { border-color: var(--border); }
+      footer a { color: var(--primary); }
+    }
+
+    /* Reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    /* Contrast fix: warning color */
+    .warning { color: #9a4e03; }
+
     @media (max-width: 600px) {
       .port-row { flex-wrap: wrap; }
       .container { padding: 1rem; }
@@ -259,10 +310,11 @@
     </header>
 
     <main>
+    <form id="config-form" novalidate>
       <div class="form-group">
         <label for="docker-image">Docker Image</label>
-        <input type="text" id="docker-image" placeholder="e.g., eclipse-mosquitto:2.0">
-        <span class="field-error" data-error-for="docker-image"></span>
+        <input type="text" id="docker-image" placeholder="e.g., eclipse-mosquitto:2.0" aria-describedby="err-docker-image">
+        <span class="field-error" data-error-for="docker-image" id="err-docker-image"></span>
       </div>
 
       <div class="form-group">
@@ -519,7 +571,7 @@
         <div id="scheduler-options-group" style="display: none;">
           <h4>Scheduled Tasks</h4>
           <div id="scheduler-tasks-list"></div>
-          <button type="button" class="add-port-btn" id="add-scheduler-task">Add Task</button>
+          <button type="button" class="add-port-btn" id="add-scheduler-task" aria-label="Add scheduled task">Add Task</button>
         </div>
       </details>
 
@@ -527,55 +579,56 @@
         <summary>Copy from image (multi-stage)</summary>
         <p>Copy files from other Docker images into your app (COPY --from=).</p>
         <div id="copy-from-list"></div>
-        <button type="button" class="add-port-btn" id="add-copy-from">Add source</button>
+        <button type="button" class="add-port-btn" id="add-copy-from" aria-label="Add COPY --from source image">Add source</button>
       </details>
 
       <details>
         <summary>Services (multi-process)</summary>
         <p>Add multiple services to run inside a single Cloudron app with path-based routing.</p>
         <div id="services-list"></div>
-        <button type="button" class="add-port-btn" id="add-service">Add Service</button>
+        <button type="button" class="add-port-btn" id="add-service" aria-label="Add service process">Add Service</button>
       </details>
 
       <details>
         <summary>Customize ports</summary>
         <h4>TCP Ports</h4>
         <div id="tcp-ports-list"></div>
-        <button class="add-port-btn" id="add-tcp-port">Add TCP port</button>
+        <button type="button" class="add-port-btn" id="add-tcp-port" aria-label="Add TCP port">Add TCP port</button>
 
         <h4>UDP Ports</h4>
         <div id="udp-ports-list"></div>
-        <button class="add-port-btn" id="add-udp-port">Add UDP port</button>
+        <button type="button" class="add-port-btn" id="add-udp-port" aria-label="Add UDP port">Add UDP port</button>
 
         <span class="field-error" data-error-for="ports"></span>
       </details>
 
-      <div id="errors"></div>
-      <div id="warnings"></div>
+      <div id="errors" role="alert" aria-live="assertive"></div>
+      <div id="warnings" role="status" aria-live="polite"></div>
 
-      <button id="download-btn">Download ZIP</button>
+      <button id="download-btn" type="button">Download ZIP</button>
+    </form>
     </main>
 
     <section>
       <div class="preview-header">
-        <div class="preview-tabs">
-          <button class="preview-tab active" data-target="manifest">manifest</button>
-          <button class="preview-tab" data-target="dockerfile">dockerfile</button>
-          <button class="preview-tab" data-target="startsh">startsh</button>
-          <button class="preview-tab" data-target="dockerignore">dockerignore</button>
-          <button class="preview-tab" data-target="readme">readme</button>
-          <button class="preview-tab" data-target="versions">versions</button>
-          <button class="preview-tab" data-target="nginx" id="nginx-tab" style="display: none;">nginx</button>
+        <div class="preview-tabs" role="tablist" aria-label="Generated files">
+          <button class="preview-tab active" role="tab" aria-selected="true" aria-controls="panel-manifest" data-target="manifest" tabindex="0">manifest</button>
+          <button class="preview-tab" role="tab" aria-selected="false" aria-controls="panel-dockerfile" data-target="dockerfile" tabindex="-1">dockerfile</button>
+          <button class="preview-tab" role="tab" aria-selected="false" aria-controls="panel-startsh" data-target="startsh" tabindex="-1">startsh</button>
+          <button class="preview-tab" role="tab" aria-selected="false" aria-controls="panel-dockerignore" data-target="dockerignore" tabindex="-1">dockerignore</button>
+          <button class="preview-tab" role="tab" aria-selected="false" aria-controls="panel-readme" data-target="readme" tabindex="-1">readme</button>
+          <button class="preview-tab" role="tab" aria-selected="false" aria-controls="panel-versions" data-target="versions" tabindex="-1">versions</button>
+          <button class="preview-tab" role="tab" aria-selected="false" aria-controls="panel-nginx" data-target="nginx" id="nginx-tab" style="display: none;" tabindex="-1">nginx</button>
         </div>
-        <button class="copy-btn" data-copy="preview-manifest">Copy</button>
+        <button class="copy-btn" data-copy="preview-manifest" aria-label="Copy to clipboard">Copy</button>
       </div>
-      <div class="preview-content active" data-panel="manifest"><pre><code id="preview-manifest"></code></pre></div>
-      <div class="preview-content" data-panel="dockerfile"><pre><code id="preview-dockerfile"></code></pre></div>
-      <div class="preview-content" data-panel="startsh"><pre><code id="preview-startsh"></code></pre></div>
-      <div class="preview-content" data-panel="dockerignore"><pre><code id="preview-dockerignore"></code></pre></div>
-      <div class="preview-content" data-panel="readme"><pre><code id="preview-readme"></code></pre></div>
-      <div class="preview-content" data-panel="versions"><pre><code id="preview-versions"></code></pre></div>
-      <div class="preview-content" data-panel="nginx"><pre><code id="preview-nginx"></code></pre></div>
+      <div class="preview-content active" id="panel-manifest" role="tabpanel" data-panel="manifest"><pre><code id="preview-manifest"></code></pre></div>
+      <div class="preview-content" id="panel-dockerfile" role="tabpanel" data-panel="dockerfile" hidden><pre><code id="preview-dockerfile"></code></pre></div>
+      <div class="preview-content" id="panel-startsh" role="tabpanel" data-panel="startsh" hidden><pre><code id="preview-startsh"></code></pre></div>
+      <div class="preview-content" id="panel-dockerignore" role="tabpanel" data-panel="dockerignore" hidden><pre><code id="preview-dockerignore"></code></pre></div>
+      <div class="preview-content" id="panel-readme" role="tabpanel" data-panel="readme" hidden><pre><code id="preview-readme"></code></pre></div>
+      <div class="preview-content" id="panel-versions" role="tabpanel" data-panel="versions" hidden><pre><code id="preview-versions"></code></pre></div>
+      <div class="preview-content" id="panel-nginx" role="tabpanel" data-panel="nginx" hidden><pre><code id="preview-nginx"></code></pre></div>
     </section>
 
     <footer>
