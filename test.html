@@ -1290,7 +1290,9 @@
     const p3Manifest = JSON.parse(generateManifest(phase3Config));
     assert("manifest: httpPorts present", !!p3Manifest.httpPorts, true);
     assert("manifest: httpPorts API port", p3Manifest.httpPorts.API.containerPort, 9000);
-    assert("manifest: checklist length", p3Manifest.checklist.length, 2);
+    assert("manifest: checklist is object", typeof p3Manifest.checklist, "object");
+    assert("manifest: checklist has keys", Object.keys(p3Manifest.checklist).length, 2);
+    assert("manifest: checklist item has message", p3Manifest.checklist["change_admin_password"].message, "Change admin password");
     assert("manifest: logPaths present", p3Manifest.logPaths[0], "/app/data/logs/app.log");
     assert("manifest: secondarySubdomains", p3Manifest.secondarySubdomains.length, 2);
     assert("manifest: fullDomain", p3Manifest.fullDomain, true);

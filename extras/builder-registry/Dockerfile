@@ -6,9 +6,6 @@ COPY --from=registry:2 /bin/registry /usr/local/bin/registry
 # Install nginx for reverse proxy
 RUN apt-get update && apt-get install -y --no-install-recommends nginx && rm -rf /var/lib/apt/lists/*
 
-# Registry config
-COPY registry-config.yml /app/code/registry-config.yml
-
 # Nginx reverse proxy config
 COPY nginx.conf /app/code/nginx.conf
 

@@ -3,6 +3,9 @@ set -eu -o pipefail
 
 export DOCKER_HOST="${CLOUDRON_DOCKER_HOST}"
 
+# Accept self-signed certificates on test/local Cloudron instances
+export NODE_TLS_REJECT_UNAUTHORIZED=0
+
 # Initialize data directories
 mkdir -p /app/data/registry
 

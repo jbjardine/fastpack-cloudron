@@ -150,7 +150,14 @@ export function generateManifest(config) {
   if (config.singleUser) manifest.singleUser = true;
   setIfArray("secondarySubdomains");
   setIfArray("logPaths");
-  setIfArray("checklist");
+  if (config.checklist && config.checklist.length > 0) {
+    const cl = {};
+    for (const item of config.checklist) {
+      const key = item.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "item";
+      cl[key] = { message: item };
+    }
+    manifest.checklist = cl;
+  }
   setIfArray("runtimeDirs");
   setIfArray("persistentDirs");
   setIfPresent("backupCommand");
