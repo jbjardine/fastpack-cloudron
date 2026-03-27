@@ -31,5 +31,5 @@ jobs:
           node-version: "20"
       - name: Verify Docker is available
         run: docker --version
-      - name: Run build tests
-        run: node test-build.mjs
+      - name: Run build tests with post-build checks
+        run: node test-build.mjs --checks

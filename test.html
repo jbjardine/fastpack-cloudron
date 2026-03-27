@@ -34,6 +34,12 @@
       generateCloudronVersions,
       generateNginxConf,
       generateDeploySh,
+      generateDeployCmd,
+      SAFE_DOCKER_REF,
+      SAFE_PATH,
+      SAFE_IDENTIFIER,
+      SAFE_VERSION,
+      SAFE_ROUTE_PATH,
     } from "./generators.js";
 
     const results = document.getElementById("results");
@@ -104,6 +110,36 @@
         results.appendChild(detail);
         failed++;
         return;
+      }
+      results.appendChild(el);
+    }
+
+    function assertThrows(description, fn) {
+      const el = document.createElement("div");
+      try {
+        fn();
+        el.className = "fail";
+        el.textContent = "FAIL: " + description + " (expected throw but none occurred)";
+        failed++;
+      } catch (e) {
+        el.className = "pass";
+        el.textContent = "PASS: " + description;
+        passed++;
+      }
+      results.appendChild(el);
+    }
+
+    function assertNoThrow(description, fn) {
+      const el = document.createElement("div");
+      try {
+        fn();
+        el.className = "pass";
+        el.textContent = "PASS: " + description;
+        passed++;
+      } catch (e) {
+        el.className = "fail";
+        el.textContent = "FAIL: " + description + " (unexpected throw: " + e.message + ")";
+        failed++;
       }
       results.appendChild(el);
     }
@@ -1082,6 +1118,158 @@
     assertIncludes("readme: gosu whoami check", preflightReadme, "gosu cloudron:cloudron whoami");
 
     // ========================================
+    // generateDeployCmd
+    // ========================================
+    addSuite("generateDeployCmd");
+
+    const deployCmd = generateDeployCmd();
+    assertIncludes("deployCmd: @echo off", deployCmd, "@echo off");
+    assertIncludes("deployCmd: calls node", deployCmd, "node");
+    assertIncludes("deployCmd: references deploy.js", deployCmd, "deploy.js");
+    assertIncludes("deployCmd: passes args", deployCmd, "%*");
+    assertIncludes("deployCmd: pause", deployCmd, "pause");
+
+    // ========================================
+    // Input safety regex patterns
+    // ========================================
+    addSuite("Input safety — regex patterns");
+
+    assert("SAFE_DOCKER_REF: valid image", SAFE_DOCKER_REF.test("nginx:latest"), true);
+    assert("SAFE_DOCKER_REF: valid with registry", SAFE_DOCKER_REF.test("registry.example.com/org/app:v1.2"), true);
+    assert("SAFE_DOCKER_REF: valid SHA256 digest", SAFE_DOCKER_REF.test("nginx@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"), true);
+    assert("SAFE_DOCKER_REF: rejects newline", SAFE_DOCKER_REF.test("nginx\nRUN malicious"), false);
+    assert("SAFE_DOCKER_REF: rejects semicolon", SAFE_DOCKER_REF.test("nginx;echo hacked"), false);
+    assert("SAFE_DOCKER_REF: rejects space", SAFE_DOCKER_REF.test("nginx latest"), false);
+    assert("SAFE_DOCKER_REF: rejects empty", SAFE_DOCKER_REF.test(""), false);
+
+    assert("SAFE_PATH: valid path", SAFE_PATH.test("/usr/local/bin/app"), true);
+    assert("SAFE_PATH: rejects $() command substitution", SAFE_PATH.test("$(rm -rf /)"), false);
+    assert("SAFE_PATH: rejects backtick", SAFE_PATH.test("`whoami`"), false);
+    assert("SAFE_PATH: rejects space", SAFE_PATH.test("/path with space"), false);
+
+    assert("SAFE_IDENTIFIER: valid name", SAFE_IDENTIFIER.test("myService"), true);
+    assert("SAFE_IDENTIFIER: valid with hyphen", SAFE_IDENTIFIER.test("my-service"), true);
+    assert("SAFE_IDENTIFIER: rejects leading digit", SAFE_IDENTIFIER.test("1service"), false);
+    assert("SAFE_IDENTIFIER: rejects $() injection", SAFE_IDENTIFIER.test("svc$(whoami)"), false);
+    assert("SAFE_IDENTIFIER: rejects backtick", SAFE_IDENTIFIER.test("svc`id`"), false);
+    assert("SAFE_IDENTIFIER: rejects semicolon", SAFE_IDENTIFIER.test("svc;echo"), false);
+
+    assert("SAFE_VERSION: valid semver", SAFE_VERSION.test("1.2.3"), true);
+    assert("SAFE_VERSION: valid with v prefix", SAFE_VERSION.test("v1.0.0-beta"), true);
+    assert("SAFE_VERSION: rejects quote break", SAFE_VERSION.test('1.0"; echo hacked; echo "'), false);
+    assert("SAFE_VERSION: rejects $() injection", SAFE_VERSION.test("$(whoami)"), false);
+    assert("SAFE_VERSION: rejects newline", SAFE_VERSION.test("1.0\n"), false);
+
+    assert("SAFE_ROUTE_PATH: valid path", SAFE_ROUTE_PATH.test("/api"), true);
+    assert("SAFE_ROUTE_PATH: valid nested", SAFE_ROUTE_PATH.test("/api/v1"), true);
+    assert("SAFE_ROUTE_PATH: rejects no leading /", SAFE_ROUTE_PATH.test("api"), false);
+    assert("SAFE_ROUTE_PATH: rejects semicolon", SAFE_ROUTE_PATH.test("/api;"), false);
+    assert("SAFE_ROUTE_PATH: rejects newline", SAFE_ROUTE_PATH.test("/api\n"), false);
+
+    // ========================================
+    // F-01: Dockerfile FROM injection
+    // ========================================
+    addSuite("Security — Dockerfile FROM injection (F-01)");
+
+    const safeConfig = {
+      image: "nginx:latest", id: "io.test.app", title: "Test", version: "1.0.0",
+      httpPort: 8080, hasWebUI: true, addons: [], tcpPorts: [], udpPorts: [],
+      schedulerTasks: [], services: [], capabilities: [], mediaLinks: [],
+    };
+
+    assertNoThrow("FROM: valid image passes", () => generateDockerfile(safeConfig));
+    assertNoThrow("FROM: complex registry ref passes", () =>
+      generateDockerfile({ ...safeConfig, image: "ghcr.io/org/app:v2.1-alpine" }));
+    assertThrows("FROM: newline in image throws", () =>
+      generateDockerfile({ ...safeConfig, image: "nginx\nRUN echo hacked" }));
+    assertThrows("FROM: CRLF in image throws", () =>
+      generateDockerfile({ ...safeConfig, image: "nginx\r\nRUN echo hacked" }));
+    assertThrows("FROM: semicolon in image throws", () =>
+      generateDockerfile({ ...safeConfig, image: "nginx;echo hacked" }));
+    assertThrows("FROM: space in image throws", () =>
+      generateDockerfile({ ...safeConfig, image: "nginx latest" }));
+
+    // ========================================
+    // F-02: COPY --from injection
+    // ========================================
+    addSuite("Security — COPY --from injection (F-02)");
+
+    assertNoThrow("COPY: valid copyFrom passes", () =>
+      generateDockerfile({ ...safeConfig, copyFrom: [{ image: "builder:latest", src: "/app/build", dest: "/app/code" }] }));
+    assertThrows("COPY: newline in copyFrom image throws", () =>
+      generateDockerfile({ ...safeConfig, copyFrom: [{ image: "builder\nRUN bad", src: "/src", dest: "/dest" }] }));
+    assertThrows("COPY: $() in src path throws", () =>
+      generateDockerfile({ ...safeConfig, copyFrom: [{ image: "builder:1", src: "$(rm -rf /)", dest: "/dest" }] }));
+    assertThrows("COPY: backtick in dest path throws", () =>
+      generateDockerfile({ ...safeConfig, copyFrom: [{ image: "builder:1", src: "/src", dest: "`whoami`" }] }));
+
+    // ========================================
+    // F-06: Service name shell injection
+    // ========================================
+    addSuite("Security — service name shell injection (F-06)");
+
+    const multiSvcConfig = {
+      ...safeConfig, hasWebUI: true,
+      services: [{ name: "web", command: "python3 -m http.server 3000", internalPort: 3000, routePath: "/app" }],
+    };
+
+    assertNoThrow("svc name: valid identifier passes", () => generateStartSh(multiSvcConfig));
+    assertThrows("svc name: $() injection throws", () =>
+      generateStartSh({ ...safeConfig, services: [{ name: "svc$(whoami)", command: "echo hi", internalPort: 3000 }] }));
+    assertThrows("svc name: backtick injection throws", () =>
+      generateStartSh({ ...safeConfig, services: [{ name: "svc`id`", command: "echo hi", internalPort: 3000 }] }));
+    assertThrows("svc name: quote-break injection throws", () =>
+      generateStartSh({ ...safeConfig, services: [{ name: 'svc"&&echo bad', command: "echo hi", internalPort: 3000 }] }));
+
+    // ========================================
+    // V-01: Version echo shell injection
+    // ========================================
+    addSuite("Security — version shell injection (V-01)");
+
+    assertNoThrow("version: valid semver with localstorage passes", () =>
+      generateStartSh({ ...safeConfig, version: "1.2.3", addons: ["localstorage"] }));
+    assertThrows("version: quote-break throws", () =>
+      generateStartSh({ ...safeConfig, version: '1.0"; echo hacked; echo "', addons: ["localstorage"] }));
+    assertThrows("version: $() injection throws", () =>
+      generateStartSh({ ...safeConfig, version: "$(whoami)", addons: ["localstorage"] }));
+    assertNoThrow("version: not checked without localstorage", () =>
+      generateStartSh({ ...safeConfig, version: "anything goes", addons: [] }));
+
+    // ========================================
+    // V-04: nginx route path injection
+    // ========================================
+    addSuite("Security — nginx route path injection (V-04)");
+
+    assertNoThrow("route path: valid /app passes", () =>
+      generateNginxConf({ ...safeConfig, services: [{ name: "web", internalPort: 3000, routePath: "/app" }] }));
+    assertThrows("route path: semicolon injection throws", () =>
+      generateNginxConf({ ...safeConfig, services: [{ name: "web", internalPort: 3000, routePath: "/app;" }] }));
+    assertThrows("route path: newline injection throws", () =>
+      generateNginxConf({ ...safeConfig, services: [{ name: "web", internalPort: 3000, routePath: "/app\nmalicious" }] }));
+
+    // ========================================
+    // Regression: full multi-service config generates without error
+    // ========================================
+    addSuite("Security — regression: full complex config");
+
+    const complexConfig = {
+      ...safeConfig,
+      image: "ghcr.io/myorg/myapp:v2.0.0",
+      version: "2.0.0",
+      addons: ["localstorage"],
+      copyFrom: [{ image: "node:20-alpine", src: "/usr/local/bin/node", dest: "/usr/local/bin/node" }],
+      services: [
+        { name: "api", command: "node server.js", internalPort: 3000, routePath: "/api" },
+        { name: "frontend", command: "nginx -g 'daemon off;'", internalPort: 4000, routePath: "/app" },
+      ],
+    };
+
+    assertNoThrow("complex: generateDockerfile succeeds", () => generateDockerfile(complexConfig));
+    assertNoThrow("complex: generateStartSh succeeds", () => generateStartSh(complexConfig));
+    assertNoThrow("complex: generateNginxConf succeeds", () => generateNginxConf(complexConfig));
+    assertNoThrow("complex: generateManifest succeeds", () => generateManifest(complexConfig));
+
+    // ========================================
     // Summary
     // ========================================
     const total = passed + failed;
@@ -1090,8 +1278,10 @@
     summary.appendChild(summaryEl);
     if (failed === 0) {
       summary.className = "all-pass";
+      summary.dataset.status = "pass";
     } else {
       summary.className = "has-fail";
+      summary.dataset.status = "fail";
     }
   </script>
 </body>

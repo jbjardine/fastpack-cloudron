@@ -13,6 +13,11 @@ import {
   generateNginxConf,
   generateDeploySh,
   generateDeployCmd,
+  SAFE_DOCKER_REF,
+  SAFE_PATH,
+  SAFE_IDENTIFIER,
+  SAFE_VERSION,
+  SAFE_ROUTE_PATH,
 } from './generators.js';
 
 /**
@@ -278,6 +283,66 @@ function validate(config) {
       field: 'docker-image',
       message: 'Enter a Docker image (e.g., nginx:latest)',
     });
+  } else if (!SAFE_DOCKER_REF.test(config.image)) {
+    errors.push({
+      field: 'docker-image',
+      message: 'Invalid image name. Use only letters, digits, dots, hyphens, slashes, colons, and @sha256 digests.',
+    });
+  }
+
+  // version format (interpolated into shell scripts)
+  if (config.version && !SAFE_VERSION.test(config.version)) {
+    errors.push({
+      field: 'app-version',
+      message: 'Invalid version. Use only letters, digits, dots, and hyphens.',
+    });
+  }
+
+  // COPY --from= validation
+  if (config.copyFrom && config.copyFrom.length > 0) {
+    for (const cf of config.copyFrom) {
+      if (cf.image && !SAFE_DOCKER_REF.test(cf.image)) {
+        errors.push({
+          field: 'copy-from',
+          message: `Invalid COPY --from image "${cf.image}". Use only letters, digits, dots, hyphens, slashes, colons.`,
+        });
+        break;
+      }
+      if (cf.src && !SAFE_PATH.test(cf.src)) {
+        errors.push({
+          field: 'copy-from',
+          message: `Invalid source path "${cf.src}". Use only letters, digits, dots, hyphens, slashes.`,
+        });
+        break;
+      }
+      if (cf.dest && !SAFE_PATH.test(cf.dest)) {
+        errors.push({
+          field: 'copy-from',
+          message: `Invalid destination path "${cf.dest}". Use only letters, digits, dots, hyphens, slashes.`,
+        });
+        break;
+      }
+    }
+  }
+
+  // Service name validation (interpolated into shell echo and nginx config)
+  if (config.services && config.services.length > 0) {
+    for (const svc of config.services) {
+      if (svc.name && !SAFE_IDENTIFIER.test(svc.name)) {
+        errors.push({
+          field: 'services',
+          message: `Invalid service name "${svc.name}". Start with a letter, then letters, digits, hyphens, underscores.`,
+        });
+        break;
+      }
+      if (svc.routePath && !SAFE_ROUTE_PATH.test(svc.routePath)) {
+        errors.push({
+          field: 'services',
+          message: `Invalid route path "${svc.routePath}". Must start with / and contain only letters, digits, dots, hyphens, slashes.`,
+        });
+        break;
+      }
+    }
   }
 
   // id format

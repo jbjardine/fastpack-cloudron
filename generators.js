@@ -1,5 +1,56 @@
 // generators.js — Pure generator functions for FastPackCloudron
 
+// --- Input safety assertions (defense-in-depth) ---
+// These throw on invalid input to prevent injection in generated Dockerfiles and shell scripts.
+// Validation in app.js:validate() provides user-friendly error messages;
+// these guards protect generators even when called from other contexts.
+
+const SAFE_DOCKER_REF = /^[a-zA-Z0-9][a-zA-Z0-9._/:-]*(:[a-zA-Z0-9._-]+)?(@sha256:[a-f0-9]{64})?$/;
+const SAFE_PATH = /^[a-zA-Z0-9._/-]+$/;
+const SAFE_IDENTIFIER = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
+const SAFE_VERSION = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+const SAFE_ROUTE_PATH = /^\/[a-zA-Z0-9._\/-]*$/;
+
+function assertSafeDockerRef(value, context) {
+  if (!value || !SAFE_DOCKER_REF.test(value)) {
+    throw new Error(`Unsafe Docker reference in ${context}: ${JSON.stringify(value)}`);
+  }
+}
+
+function assertSafePath(value, context) {
+  if (!value || !SAFE_PATH.test(value)) {
+    throw new Error(`Unsafe path in ${context}: ${JSON.stringify(value)}`);
+  }
+}
+
+function assertSafeIdentifier(value, context) {
+  if (!value || !SAFE_IDENTIFIER.test(value)) {
+    throw new Error(`Unsafe identifier in ${context}: ${JSON.stringify(value)}`);
+  }
+}
+
+function assertSafeVersion(value, context) {
+  if (!value || !SAFE_VERSION.test(value)) {
+    throw new Error(`Unsafe version string in ${context}: ${JSON.stringify(value)}`);
+  }
+}
+
+function assertSafePort(value, context) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    throw new Error(`Unsafe port in ${context}: ${JSON.stringify(value)}`);
+  }
+}
+
+function assertSafeRoutePath(value, context) {
+  if (!value || !SAFE_ROUTE_PATH.test(value)) {
+    throw new Error(`Unsafe route path in ${context}: ${JSON.stringify(value)}`);
+  }
+}
+
+// Re-export regex patterns for use by validation in app.js
+export { SAFE_DOCKER_REF, SAFE_PATH, SAFE_IDENTIFIER, SAFE_VERSION, SAFE_ROUTE_PATH };
+
 /**
  * Strips tag, strips registry prefix (take last segment after /),
  * replaces hyphens/underscores with dots, drops leading digits from segments.
@@ -258,6 +309,8 @@ export function generateManifest(config) {
  * Fix #1: install gosu for non-root execution
  */
 export function generateDockerfile(config) {
+  assertSafeDockerRef(config.image, "Dockerfile FROM");
+
   const lines = [];
   lines.push(`FROM ${config.image}`);
 
@@ -266,6 +319,9 @@ export function generateDockerfile(config) {
     lines.push("");
     lines.push("# Copy files from external images");
     for (const cf of config.copyFrom) {
+      assertSafeDockerRef(cf.image, "COPY --from image");
+      assertSafePath(cf.src, "COPY --from src");
+      assertSafePath(cf.dest, "COPY --from dest");
       lines.push(`COPY --from=${cf.image} ${cf.src} ${cf.dest}`);
     }
   }
@@ -382,6 +438,7 @@ export function generateStartSh(config) {
 
   // If localstorage: init block with .initialized guard + chown
   if (hasLocalstorage) {
+    assertSafeVersion(config.version, "start.sh version echo");
     lines.push("if [ ! -f /app/data/.initialized ]; then");
     lines.push("    echo \"Initializing data directory...\"");
     lines.push(`    echo "${config.version}" > /app/data/.initialized`);
@@ -400,6 +457,7 @@ export function generateStartSh(config) {
     lines.push("");
 
     for (const svc of config.services) {
+      assertSafeIdentifier(svc.name, "start.sh service name");
       lines.push(`echo "Starting ${svc.name}..."`);
       lines.push(`/usr/local/bin/gosu cloudron:cloudron ${svc.command} &`);
       lines.push("");
@@ -423,6 +481,7 @@ export function generateStartSh(config) {
     lines.push("/usr/local/bin/gosu cloudron:cloudron YOUR_SERVICE_COMMAND &");
     lines.push("");
     lines.push("# Minimal health check endpoint (returns 200 OK)");
+    assertSafePort(config.httpPort, "start.sh healthcheck port");
     lines.push(
       `python3 -c "
 import http.server
@@ -685,12 +744,16 @@ export function generateNginxConf(config) {
   lines.push("  scgi_temp_path /tmp/nginx_scgi;");
   lines.push("");
   lines.push("  server {");
+  assertSafePort(config.httpPort, "nginx listen port");
   lines.push(`    listen ${config.httpPort};`);
   lines.push("");
 
   // Services with route paths
   const routed = config.services.filter((s) => s.routePath);
   for (const svc of routed) {
+    assertSafeIdentifier(svc.name, "nginx service comment");
+    assertSafeRoutePath(svc.routePath, "nginx location");
+    assertSafePort(svc.internalPort, "nginx proxy_pass port");
     const path = svc.routePath.endsWith("/") ? svc.routePath : svc.routePath + "/";
     lines.push(`    # ${svc.name} → localhost:${svc.internalPort}`);
     lines.push(`    location ${path} {`);
@@ -704,6 +767,7 @@ export function generateNginxConf(config) {
   // Default location: first routed service or first service with a port
   const defaultSvc = routed[0] || config.services[0];
   if (defaultSvc) {
+    assertSafePort(defaultSvc.internalPort, "nginx default proxy_pass port");
     lines.push("    # Default: " + defaultSvc.name);
     lines.push("    location / {");
     lines.push(`      proxy_pass http://127.0.0.1:${defaultSvc.internalPort};`);

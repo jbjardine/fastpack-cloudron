@@ -36,11 +36,11 @@ async function run() {
     await page.waitForSelector("#summary", { timeout: TIMEOUT });
 
     const summaryText = await page.textContent("#summary");
-    const summaryClass = await page.getAttribute("#summary", "class");
+    const dataStatus = await page.getAttribute("#summary", "data-status");
 
     console.log(`Test result: ${summaryText}`);
 
-    if (summaryClass === "all-pass" && !summaryText.includes("FAILED")) {
+    if (dataStatus === "pass" && !summaryText.includes("FAILED")) {
       console.log("\x1b[32mAll unit tests passed!\x1b[0m");
       exitCode = 0;
     } else {
