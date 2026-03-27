@@ -100,111 +100,61 @@ export function generateManifest(config) {
   manifest.healthCheckPath = config.healthCheckPath || "/";
   manifest.httpPort = config.httpPort;
 
-  // tagline only if non-empty
-  if (config.tagline && config.tagline.trim() !== "") {
-    manifest.tagline = config.tagline;
-  }
+  // Helper: set manifest field from config if non-empty string
+  const setIfPresent = (key, configKey) => {
+    const val = config[configKey || key];
+    if (val && typeof val === "string" && val.trim() !== "") {
+      manifest[key] = val;
+    }
+  };
 
-  // author and description only if non-empty
-  if (config.author && config.author.trim() !== "") {
-    manifest.author = config.author;
-  }
+  // Helper: set manifest field from config if non-empty array
+  const setIfArray = (key, configKey) => {
+    const val = config[configKey || key];
+    if (val && val.length > 0) manifest[key] = val;
+  };
+
+  // Metadata
+  setIfPresent("tagline");
+  setIfPresent("author");
   if (config.description && config.description.trim() !== "") {
     manifest.description = "file://DESCRIPTION.md";
   }
 
-  // Publishing fields
-  if (config.website && config.website.trim() !== "") {
-    manifest.website = config.website;
-  }
-  if (config.contactEmail && config.contactEmail.trim() !== "") {
-    manifest.contactEmail = config.contactEmail;
-  }
-  if (config.tags && config.tags.length > 0) {
-    manifest.tags = config.tags;
-  }
-  if (config.configurePath && config.configurePath.trim() !== "") {
-    manifest.configurePath = config.configurePath;
-  }
-  if (config.upstreamVersion && config.upstreamVersion.trim() !== "") {
-    manifest.upstreamVersion = config.upstreamVersion;
-  }
-  if (config.postInstallMessage && config.postInstallMessage.trim() !== "") {
-    manifest.postInstallMessage = config.postInstallMessage;
-  }
-  if (config.changelog && config.changelog.trim() !== "") {
-    manifest.changelog = config.changelog;
-  }
-  if (config.icon && config.icon.trim() !== "") {
-    manifest.icon = config.icon;
-  }
+  // Publishing & metadata fields
+  setIfPresent("website");
+  setIfPresent("contactEmail");
+  setIfArray("tags");
+  setIfPresent("configurePath");
+  setIfPresent("upstreamVersion");
+  setIfPresent("postInstallMessage");
+  setIfPresent("changelog");
+  setIfPresent("icon");
   if (config.memoryLimit && config.memoryLimit > 0) {
     manifest.memoryLimit = config.memoryLimit;
   }
-
-  // Publishing fields
-  if (config.packagerName && config.packagerName.trim() !== "") {
-    manifest.packagerName = config.packagerName;
-  }
-  if (config.packagerUrl && config.packagerUrl.trim() !== "") {
-    manifest.packagerUrl = config.packagerUrl;
-  }
-  if (config.iconUrl && config.iconUrl.trim() !== "") {
-    manifest.iconUrl = config.iconUrl;
-  }
-  if (config.mediaLinks && config.mediaLinks.length > 0) {
-    manifest.mediaLinks = config.mediaLinks;
-  }
-  if (config.documentationUrl && config.documentationUrl.trim() !== "") {
-    manifest.documentationUrl = config.documentationUrl;
-  }
-  if (config.forumUrl && config.forumUrl.trim() !== "") {
-    manifest.forumUrl = config.forumUrl;
-  }
+  setIfPresent("packagerName");
+  setIfPresent("packagerUrl");
+  setIfPresent("iconUrl");
+  setIfArray("mediaLinks");
+  setIfPresent("documentationUrl");
+  setIfPresent("forumUrl");
 
   // Advanced fields
-  if (config.minBoxVersion && config.minBoxVersion.trim() !== "") {
-    manifest.minBoxVersion = config.minBoxVersion;
-  }
-  if (config.maxBoxVersion && config.maxBoxVersion.trim() !== "") {
-    manifest.maxBoxVersion = config.maxBoxVersion;
-  }
-  if (config.targetBoxVersion && config.targetBoxVersion.trim() !== "") {
-    manifest.targetBoxVersion = config.targetBoxVersion;
-  }
-  if (config.capabilities && config.capabilities.length > 0) {
-    manifest.capabilities = config.capabilities;
-  }
-  if (config.multiDomain) {
-    manifest.multiDomain = true;
-  }
-  if (config.fullDomain) {
-    manifest.fullDomain = true;
-  }
-  if (config.singleUser) {
-    manifest.singleUser = true;
-  }
-  if (config.secondarySubdomains && config.secondarySubdomains.length > 0) {
-    manifest.secondarySubdomains = config.secondarySubdomains;
-  }
-  if (config.logPaths && config.logPaths.length > 0) {
-    manifest.logPaths = config.logPaths;
-  }
-  if (config.checklist && config.checklist.length > 0) {
-    manifest.checklist = config.checklist;
-  }
-  if (config.runtimeDirs && config.runtimeDirs.length > 0) {
-    manifest.runtimeDirs = config.runtimeDirs;
-  }
-  if (config.persistentDirs && config.persistentDirs.length > 0) {
-    manifest.persistentDirs = config.persistentDirs;
-  }
-  if (config.backupCommand && config.backupCommand.trim() !== "") {
-    manifest.backupCommand = config.backupCommand;
-  }
-  if (config.restoreCommand && config.restoreCommand.trim() !== "") {
-    manifest.restoreCommand = config.restoreCommand;
-  }
+  setIfPresent("minBoxVersion");
+  setIfPresent("maxBoxVersion");
+  setIfPresent("targetBoxVersion");
+  setIfArray("capabilities");
+  if (config.multiDomain) manifest.multiDomain = true;
+  if (config.fullDomain) manifest.fullDomain = true;
+  if (config.singleUser) manifest.singleUser = true;
+  setIfArray("secondarySubdomains");
+  setIfArray("logPaths");
+  setIfArray("checklist");
+  setIfArray("runtimeDirs");
+  setIfArray("persistentDirs");
+  setIfPresent("backupCommand");
+  setIfPresent("restoreCommand");
 
   // SSO at root level: optionalSso when sso is null or "none"
   // But not when multi-service SSO has proxyAuth services

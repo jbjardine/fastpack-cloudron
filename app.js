@@ -1078,6 +1078,99 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
+  // --- localStorage persistence ---
+  const STORAGE_KEY = 'fastpack-cloudron-config';
+
+  // Fields to persist (simple inputs/selects/textareas by ID)
+  const persistIds = [
+    'docker-image', 'app-id', 'app-title', 'app-version', 'app-upstream-version',
+    'app-author', 'app-tagline', 'app-description', 'app-website', 'app-contact-email',
+    'app-configure-path', 'app-post-install-message', 'app-changelog', 'app-icon',
+    'health-check-path', 'http-port', 'app-memory-limit',
+    'database', 'sso',
+    'oidc-redirect-uri', 'oidc-logout-uri', 'oidc-token-algo',
+    'proxyauth-path',
+    'packager-name', 'packager-url', 'icon-url', 'media-links',
+    'documentation-url', 'forum-url',
+    'min-box-version', 'max-box-version', 'target-box-version',
+    'runtime-dirs', 'persistent-dirs', 'backup-command', 'restore-command',
+    'secondary-subdomains', 'log-paths', 'checklist',
+    'postgresql-locale', 'localstorage-sqlite-paths',
+  ];
+
+  // Checkboxes to persist by ID
+  const persistCheckboxes = [
+    'web-ui-yes', 'web-ui-no', 'multi-domain', 'full-domain', 'single-user',
+    'proxyauth-basic-auth', 'proxyauth-bearer-auth',
+    'mysql-multiple-dbs', 'mongodb-oplog', 'redis-no-password',
+    'sendmail-optional', 'sendmail-display-name', 'sendmail-valid-cert',
+    'localstorage-ftp', 'localstorage-sqlite',
+  ];
+
+  function saveToLocalStorage() {
+    try {
+      const data = {};
+      for (const id of persistIds) {
+        const el = document.getElementById(id);
+        if (el) data[id] = el.value;
+      }
+      for (const id of persistCheckboxes) {
+        const el = document.getElementById(id);
+        if (el) data['cb:' + id] = el.checked;
+      }
+      // Persist addon and tag checkboxes
+      data['addons'] = Array.from(document.querySelectorAll('.addon-checkbox:checked')).map(c => c.value);
+      data['tags'] = Array.from(document.querySelectorAll('.tag-checkbox:checked')).map(c => c.value);
+      data['capabilities'] = Array.from(document.querySelectorAll('.capability-checkbox:checked')).map(c => c.value);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch (e) { /* ignore storage errors */ }
+  }
+
+  function loadFromLocalStorage() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      for (const id of persistIds) {
+        const el = document.getElementById(id);
+        if (el && data[id] !== undefined) el.value = data[id];
+      }
+      for (const id of persistCheckboxes) {
+        const el = document.getElementById(id);
+        if (el && data['cb:' + id] !== undefined) el.checked = data['cb:' + id];
+      }
+      // Restore addon/tag/capability checkboxes
+      if (data['addons']) {
+        for (const cb of document.querySelectorAll('.addon-checkbox')) {
+          cb.checked = data['addons'].includes(cb.value);
+        }
+      }
+      if (data['tags']) {
+        for (const cb of document.querySelectorAll('.tag-checkbox')) {
+          cb.checked = data['tags'].includes(cb.value);
+        }
+      }
+      if (data['capabilities']) {
+        for (const cb of document.querySelectorAll('.capability-checkbox')) {
+          cb.checked = data['capabilities'].includes(cb.value);
+        }
+      }
+      // Mark auto-generated fields as user-edited if they have saved values
+      if (data['app-id']) document.getElementById('app-id').dataset.userEdited = 'true';
+      if (data['app-title']) document.getElementById('app-title').dataset.userEdited = 'true';
+    } catch (e) { /* ignore parse errors */ }
+  }
+
+  // Save on every change (debounced via existing updatePreview)
+  const origUpdatePreview = updatePreview;
+  updatePreview = function () {
+    origUpdatePreview();
+    saveToLocalStorage();
+  };
+
+  // Load saved state
+  loadFromLocalStorage();
+
   // Initial preview
   updatePreview();
 });
