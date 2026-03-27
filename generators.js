@@ -166,11 +166,32 @@ export function generateManifest(config) {
   if (config.minBoxVersion && config.minBoxVersion.trim() !== "") {
     manifest.minBoxVersion = config.minBoxVersion;
   }
+  if (config.maxBoxVersion && config.maxBoxVersion.trim() !== "") {
+    manifest.maxBoxVersion = config.maxBoxVersion;
+  }
+  if (config.targetBoxVersion && config.targetBoxVersion.trim() !== "") {
+    manifest.targetBoxVersion = config.targetBoxVersion;
+  }
   if (config.capabilities && config.capabilities.length > 0) {
     manifest.capabilities = config.capabilities;
   }
   if (config.multiDomain) {
     manifest.multiDomain = true;
+  }
+  if (config.fullDomain) {
+    manifest.fullDomain = true;
+  }
+  if (config.singleUser) {
+    manifest.singleUser = true;
+  }
+  if (config.secondarySubdomains && config.secondarySubdomains.length > 0) {
+    manifest.secondarySubdomains = config.secondarySubdomains;
+  }
+  if (config.logPaths && config.logPaths.length > 0) {
+    manifest.logPaths = config.logPaths;
+  }
+  if (config.checklist && config.checklist.length > 0) {
+    manifest.checklist = config.checklist;
   }
   if (config.runtimeDirs && config.runtimeDirs.length > 0) {
     manifest.runtimeDirs = config.runtimeDirs;
@@ -245,6 +266,10 @@ export function generateManifest(config) {
     addons.oidc = oidcOpts;
   } else if (config.sso === "ldap") {
     addons.ldap = {};
+  } else if (config.sso === "oauth") {
+    addons.oauth = {};
+  } else if (config.sso === "simpleauth") {
+    addons.simpleauth = {};
   }
 
   // Additional addons from array (with per-addon options)
@@ -264,6 +289,13 @@ export function generateManifest(config) {
           }
         }
         addons.scheduler = tasks;
+      } else if (addon === "localstorage") {
+        const lsOpts = {};
+        if (config.localstorageFtp) lsOpts.ftp = true;
+        if (config.localstorageSqlite && config.localstorageSqlitePaths && config.localstorageSqlitePaths.length > 0) {
+          lsOpts.sqlite = config.localstorageSqlitePaths;
+        }
+        addons.localstorage = lsOpts;
       } else {
         addons[addon] = addons[addon] || {};
       }
@@ -271,6 +303,20 @@ export function generateManifest(config) {
   }
 
   manifest.addons = addons;
+
+  // HTTP ports (extra HTTP services with separate subdomains)
+  if (config.httpPorts && config.httpPorts.length > 0) {
+    const httpPortsObj = {};
+    for (const port of config.httpPorts) {
+      httpPortsObj[port.name] = {
+        title: port.title,
+        description: port.title + " port",
+        containerPort: port.containerPort,
+        defaultValue: port.defaultValue,
+      };
+    }
+    manifest.httpPorts = httpPortsObj;
+  }
 
   // TCP ports
   if (config.tcpPorts && config.tcpPorts.length > 0) {
@@ -791,4 +837,41 @@ export function generateCloudronVersions(config) {
     image: `docker.io/USERNAME/${config.id || "your-app"}:${config.version}`,
   };
   return JSON.stringify(versions, null, 2);
+}
+
+/**
+ * Generates a POSTINSTALL.md stub for App Store publishing.
+ */
+export function generatePostInstall(config) {
+  const lines = [];
+  lines.push(`# Post-Installation Notes for ${config.title}`);
+  lines.push("");
+  if (config.checklist && config.checklist.length > 0) {
+    lines.push("## Checklist");
+    lines.push("");
+    for (const item of config.checklist) {
+      lines.push(`- [ ] ${item}`);
+    }
+    lines.push("");
+  }
+  lines.push("## Getting Started");
+  lines.push("");
+  lines.push("1. Open the app from your Cloudron dashboard");
+  if (config.configurePath) {
+    lines.push(`2. Go to [${config.configurePath}](${config.configurePath}) to configure the app`);
+  }
+  lines.push("");
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * Generates a CHANGELOG.md stub for App Store publishing.
+ */
+export function generateChangelog(config) {
+  return `# Changelog
+
+## ${config.version}
+
+- Initial Cloudron package
+`;
 }

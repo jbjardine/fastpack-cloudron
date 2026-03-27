@@ -357,6 +357,8 @@
           <option value="proxyAuth">ProxyAuth</option>
           <option value="oidc">OIDC</option>
           <option value="ldap">LDAP</option>
+          <option value="oauth">OAuth (app implements OAuth)</option>
+          <option value="simpleauth">SimpleAuth (single-user)</option>
         </select>
       </div>
 
@@ -545,6 +547,32 @@
           <label for="restore-command">Custom Restore Command</label>
           <input type="text" id="restore-command" placeholder="/app/code/restore.sh">
         </div>
+        <div class="form-group">
+          <label for="max-box-version">Maximum Cloudron Version</label>
+          <input type="text" id="max-box-version" placeholder="e.g., 8.99.99">
+        </div>
+        <div class="form-group">
+          <label for="target-box-version">Target Cloudron Version</label>
+          <input type="text" id="target-box-version" placeholder="e.g., 8.0.0">
+        </div>
+        <div class="form-group">
+          <div class="checkbox-grid">
+            <label><input type="checkbox" id="full-domain"> Full domain deployment (no subdomain)</label>
+            <label><input type="checkbox" id="single-user"> Single-user app mode</label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="secondary-subdomains">Secondary Subdomains (comma-separated)</label>
+          <input type="text" id="secondary-subdomains" placeholder="e.g., api, admin">
+        </div>
+        <div class="form-group">
+          <label for="log-paths">Log Paths (comma-separated, for apps that cannot log to stdout)</label>
+          <input type="text" id="log-paths" placeholder="e.g., /app/data/logs/app.log, /tmp/error.log">
+        </div>
+        <div class="form-group">
+          <label for="checklist">Post-Install Checklist (one item per line)</label>
+          <textarea id="checklist" placeholder="Change default admin password&#10;Configure email settings&#10;Review security settings"></textarea>
+        </div>
       </details>
 
       <details>
@@ -559,6 +587,16 @@
             <label><input type="checkbox" class="addon-checkbox" value="tls"> TLS</label>
             <label><input type="checkbox" class="addon-checkbox" value="turn"> TURN</label>
             <label><input type="checkbox" class="addon-checkbox" value="docker"> Docker</label>
+          </div>
+        </div>
+        <div id="localstorage-options-group" style="display: none;">
+          <div class="checkbox-grid">
+            <label><input type="checkbox" id="localstorage-ftp"> FTP access (exposes uid/uname to app)</label>
+            <label><input type="checkbox" id="localstorage-sqlite"> SQLite paths (consistent backup)</label>
+          </div>
+          <div class="form-group" id="localstorage-sqlite-paths-group" style="display: none;">
+            <label for="localstorage-sqlite-paths">SQLite file paths (comma-separated, relative to /app/data)</label>
+            <input type="text" id="localstorage-sqlite-paths" placeholder="e.g., db.sqlite, data/app.db">
           </div>
         </div>
         <div id="sendmail-options-group" style="display: none;">
@@ -591,6 +629,10 @@
 
       <details>
         <summary>Customize ports</summary>
+        <h4>Extra HTTP Ports (separate subdomains)</h4>
+        <div id="http-ports-list"></div>
+        <button type="button" class="add-port-btn" id="add-http-port" aria-label="Add extra HTTP port">Add HTTP port</button>
+
         <h4>TCP Ports</h4>
         <div id="tcp-ports-list"></div>
         <button type="button" class="add-port-btn" id="add-tcp-port" aria-label="Add TCP port">Add TCP port</button>

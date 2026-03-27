@@ -13,6 +13,8 @@ import {
   generateNginxConf,
   generateDeploySh,
   generateDeployCmd,
+  generatePostInstall,
+  generateChangelog,
   SAFE_DOCKER_REF,
   SAFE_PATH,
   SAFE_IDENTIFIER,
@@ -58,11 +60,23 @@ function buildConfig() {
 
   // Advanced fields
   const minBoxVersionEl = document.getElementById('min-box-version');
+  const maxBoxVersionEl = document.getElementById('max-box-version');
+  const targetBoxVersionEl = document.getElementById('target-box-version');
   const multiDomainEl = document.getElementById('multi-domain');
+  const fullDomainEl = document.getElementById('full-domain');
+  const singleUserEl = document.getElementById('single-user');
+  const secondarySubdomainsEl = document.getElementById('secondary-subdomains');
   const runtimeDirsEl = document.getElementById('runtime-dirs');
   const persistentDirsEl = document.getElementById('persistent-dirs');
   const backupCommandEl = document.getElementById('backup-command');
   const restoreCommandEl = document.getElementById('restore-command');
+  const logPathsEl = document.getElementById('log-paths');
+  const checklistEl = document.getElementById('checklist');
+
+  // Localstorage sub-options
+  const localstorageFtpEl = document.getElementById('localstorage-ftp');
+  const localstorageSqliteEl = document.getElementById('localstorage-sqlite');
+  const localstorageSqlitePathsEl = document.getElementById('localstorage-sqlite-paths');
 
   // ProxyAuth options
   const proxyauthPathEl = document.getElementById('proxyauth-path');
@@ -141,6 +155,18 @@ function buildConfig() {
     });
   }
 
+  // Collect HTTP port rows (extra HTTP services with separate subdomains)
+  const httpPorts = [];
+  const httpRows = document.querySelectorAll('.http-port-row');
+  for (const row of httpRows) {
+    httpPorts.push({
+      name: row.querySelector('.port-name').value.trim(),
+      title: row.querySelector('.port-title').value.trim(),
+      containerPort: parseInt(row.querySelector('.port-container').value, 10) || 0,
+      defaultValue: parseInt(row.querySelector('.port-default').value, 10) || 0,
+    });
+  }
+
   // Collect selected tags
   const tags = [];
   const tagCheckboxes = document.querySelectorAll('.tag-checkbox:checked');
@@ -210,6 +236,7 @@ function buildConfig() {
     addons,
     tcpPorts,
     udpPorts,
+    httpPorts,
     author: authorEl.value.trim(),
     tagline: taglineEl.value.trim(),
     description: descriptionEl.value.trim(),
@@ -234,12 +261,19 @@ function buildConfig() {
     forumUrl: forumUrlEl.value.trim(),
     // Advanced
     minBoxVersion: minBoxVersionEl.value.trim(),
+    maxBoxVersion: maxBoxVersionEl.value.trim(),
+    targetBoxVersion: targetBoxVersionEl.value.trim(),
     capabilities,
     multiDomain: multiDomainEl.checked,
+    fullDomain: fullDomainEl.checked,
+    singleUser: singleUserEl.checked,
+    secondarySubdomains: parseDirs(secondarySubdomainsEl),
     runtimeDirs: parseDirs(runtimeDirsEl),
     persistentDirs: parseDirs(persistentDirsEl),
     backupCommand: backupCommandEl.value.trim(),
     restoreCommand: restoreCommandEl.value.trim(),
+    logPaths: parseDirs(logPathsEl),
+    checklist: checklistEl.value.trim().split('\n').map(s => s.trim()).filter(s => s.length > 0),
     // ProxyAuth options
     proxyauthPath: proxyauthPathEl.value.trim(),
     proxyauthBasicAuth: proxyauthBasicAuthEl.checked,
@@ -249,6 +283,10 @@ function buildConfig() {
     mongodbOplog: mongodbOplogEl.checked,
     redisNoPassword: redisNoPasswordEl.checked,
     postgresqlLocale: postgresqlLocaleEl.value.trim(),
+    // Localstorage sub-options
+    localstorageFtp: localstorageFtpEl.checked,
+    localstorageSqlite: localstorageSqliteEl.checked,
+    localstorageSqlitePaths: parseDirs(localstorageSqlitePathsEl),
     // Sendmail options
     sendmailOptional: sendmailOptionalEl.checked,
     sendmailDisplayName: sendmailDisplayNameEl.checked,
@@ -581,6 +619,8 @@ function updatePreviewNow() {
   // Show/hide addon-specific options
   toggleVisibility('sendmail-options-group', config.addons.includes('sendmail'));
   toggleVisibility('scheduler-options-group', config.addons.includes('scheduler'));
+  toggleVisibility('localstorage-options-group', config.addons.includes('localstorage'));
+  toggleVisibility('localstorage-sqlite-paths-group', config.localstorageSqlite);
 
   // Update auto-generated fields if not user-edited
   const idEl = document.getElementById('app-id');
@@ -658,6 +698,10 @@ async function downloadZip() {
     if (config.services && config.services.length > 0) {
       zip.file('nginx.conf', generateNginxConf(config));
     }
+
+    // Add publishing stubs
+    zip.file('POSTINSTALL.md', generatePostInstall(config));
+    zip.file('CHANGELOG.md', generateChangelog(config));
 
     // Add cross-platform deploy script (Node.js — works on Windows, Linux, Mac)
     zip.file('deploy.js', generateDeploySh());
@@ -934,6 +978,9 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   document.getElementById('add-udp-port').addEventListener('click', function () {
     addPortRow('udp');
+  });
+  document.getElementById('add-http-port').addEventListener('click', function () {
+    addPortRow('http');
   });
 
   // Add scheduler task button
