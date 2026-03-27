@@ -35,6 +35,8 @@
       generateNginxConf,
       generateDeploySh,
       generateDeployCmd,
+      generatePostInstall,
+      generateChangelog,
       SAFE_DOCKER_REF,
       SAFE_PATH,
       SAFE_IDENTIFIER,
@@ -1268,6 +1270,62 @@
     assertNoThrow("complex: generateStartSh succeeds", () => generateStartSh(complexConfig));
     assertNoThrow("complex: generateNginxConf succeeds", () => generateNginxConf(complexConfig));
     assertNoThrow("complex: generateManifest succeeds", () => generateManifest(complexConfig));
+
+    // ========================================
+    // Phase 3: New manifest fields
+    // ========================================
+    addSuite("Phase 3 — new manifest fields");
+
+    const phase3Config = {
+      ...safeConfig,
+      httpPorts: [{ name: "API", title: "API Port", containerPort: 9000, defaultValue: 9000 }],
+      checklist: ["Change admin password", "Enable 2FA"],
+      logPaths: ["/app/data/logs/app.log"],
+      secondarySubdomains: ["api", "admin"],
+      fullDomain: true,
+      singleUser: true,
+      maxBoxVersion: "9.0.0",
+      targetBoxVersion: "8.0.0",
+    };
+    const p3Manifest = JSON.parse(generateManifest(phase3Config));
+    assert("manifest: httpPorts present", !!p3Manifest.httpPorts, true);
+    assert("manifest: httpPorts API port", p3Manifest.httpPorts.API.containerPort, 9000);
+    assert("manifest: checklist length", p3Manifest.checklist.length, 2);
+    assert("manifest: logPaths present", p3Manifest.logPaths[0], "/app/data/logs/app.log");
+    assert("manifest: secondarySubdomains", p3Manifest.secondarySubdomains.length, 2);
+    assert("manifest: fullDomain", p3Manifest.fullDomain, true);
+    assert("manifest: singleUser", p3Manifest.singleUser, true);
+    assert("manifest: maxBoxVersion", p3Manifest.maxBoxVersion, "9.0.0");
+    assert("manifest: targetBoxVersion", p3Manifest.targetBoxVersion, "8.0.0");
+
+    // oauth and simpleauth SSO addons
+    const oauthConfig = { ...safeConfig, sso: "oauth" };
+    const oauthManifest = JSON.parse(generateManifest(oauthConfig));
+    assert("manifest: oauth addon", "oauth" in oauthManifest.addons, true);
+
+    const simpleauthConfig = { ...safeConfig, sso: "simpleauth" };
+    const saManifest = JSON.parse(generateManifest(simpleauthConfig));
+    assert("manifest: simpleauth addon", "simpleauth" in saManifest.addons, true);
+
+    // localstorage sub-options
+    const lsConfig = { ...safeConfig, addons: ["localstorage"], localstorageFtp: true, localstorageSqlite: true, localstorageSqlitePaths: ["db.sqlite"] };
+    const lsManifest = JSON.parse(generateManifest(lsConfig));
+    assert("manifest: localstorage ftp", lsManifest.addons.localstorage.ftp, true);
+    assert("manifest: localstorage sqlite", lsManifest.addons.localstorage.sqlite[0], "db.sqlite");
+
+    // ========================================
+    // Phase 3: Publishing stubs
+    // ========================================
+    addSuite("Phase 3 — publishing stubs");
+
+    const postInstall = generatePostInstall({ title: "TestApp", checklist: ["Do X", "Do Y"], configurePath: "/admin" });
+    assertIncludes("postinstall: title", postInstall, "TestApp");
+    assertIncludes("postinstall: checklist item", postInstall, "- [ ] Do X");
+    assertIncludes("postinstall: configure path", postInstall, "/admin");
+
+    const changelog = generateChangelog({ version: "2.0.0" });
+    assertIncludes("changelog: version", changelog, "## 2.0.0");
+    assertIncludes("changelog: initial", changelog, "Initial Cloudron package");
 
     // ========================================
     // Summary
