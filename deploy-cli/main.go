@@ -126,6 +126,9 @@ func main() {
 	fmt.Printf("║          ✅ App %s!            ║\n", action)
 	fmt.Printf("║  https://%s.%s\n", subdomain, info.Domain)
 	fmt.Println("╚══════════════════════════════════════╝")
+
+	fmt.Println("\nPress Enter to exit...")
+	wizard.StdinReader.ReadString('\n')
 }
 
 func fatal(format string, args ...any) {
