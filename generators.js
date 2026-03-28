@@ -265,6 +265,11 @@ export function generateManifest(config) {
     }
   }
 
+  // Auto-add docker addon when sub-containers are configured (DooD mode)
+  if (config.subcontainers && config.subcontainers.length > 0) {
+    addons.docker = addons.docker || {};
+  }
+
   manifest.addons = addons;
 
   // HTTP ports (extra HTTP services with separate subdomains)
@@ -371,9 +376,18 @@ export function generateDockerfile(config) {
       chmod +x /usr/local/bin/gosu; \\
     fi`);
   lines.push("");
-  // Install nginx for multi-service reverse proxy
+  // Install Docker CLI for DooD sub-containers
+  const hasSubcontainers = config.subcontainers && config.subcontainers.length > 0;
+  if (hasSubcontainers) {
+    lines.push("# Install Docker CLI (static binary) for DooD sub-containers");
+    lines.push("ADD https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz /tmp/docker.tgz");
+    lines.push("RUN tar -xzf /tmp/docker.tgz -C /tmp && mv /tmp/docker/docker /usr/local/bin/docker && rm -rf /tmp/docker /tmp/docker.tgz");
+    lines.push("");
+  }
+
+  // Install nginx for multi-service reverse proxy or DooD
   const hasServices = config.services && config.services.length > 0;
-  if (hasServices) {
+  if (hasServices || hasSubcontainers) {
     lines.push("# Install nginx for internal reverse proxy");
     lines.push(`RUN set -eux; \\
     if command -v apt-get >/dev/null 2>&1; then \\
@@ -386,7 +400,11 @@ export function generateDockerfile(config) {
       dnf install -y nginx && dnf clean all; \\
     fi`);
     lines.push("");
-    lines.push("COPY nginx.conf /app/code/nginx.conf");
+    if (hasSubcontainers) {
+      lines.push("COPY nginx.conf /app/code/nginx.conf.template");
+    } else {
+      lines.push("COPY nginx.conf /app/code/nginx.conf");
+    }
     lines.push("");
   }
 
@@ -493,8 +511,69 @@ export function generateStartSh(config) {
   }
 
   const hasServices = config.services && config.services.length > 0;
+  const hasSubcontainers = config.subcontainers && config.subcontainers.length > 0;
 
-  if (hasServices) {
+  if (hasSubcontainers) {
+    // DooD mode: launch sub-containers via Docker addon
+    lines.push('export DOCKER_HOST="${CLOUDRON_DOCKER_HOST}"');
+    lines.push("");
+    lines.push("# Forward signals to children and cleanup sub-containers on exit");
+    lines.push("cleanup() {");
+    for (const sub of config.subcontainers) {
+      const name = "fp-" + sub.image.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-");
+      lines.push(`  docker stop ${name} 2>/dev/null`);
+      lines.push(`  docker rm ${name} 2>/dev/null`);
+    }
+    lines.push("  kill $(jobs -p) 2>/dev/null; wait");
+    lines.push("}");
+    lines.push("trap cleanup TERM INT");
+    lines.push("");
+
+    // Launch each sub-container
+    for (const sub of config.subcontainers) {
+      const name = "fp-" + sub.image.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-");
+      assertSafeDockerRef(sub.image, "DooD sub-container image");
+      lines.push(`# Launch ${sub.image} as sub-container`);
+      lines.push(`docker rm -f ${name} 2>/dev/null || true`);
+      lines.push(`docker run -d --name ${name} \\`);
+      lines.push(`  --memory=${sub.memory || 256}m \\`);
+      lines.push(`  --restart=unless-stopped \\`);
+      lines.push(`  --label=fastpack.owner=\${HOSTNAME} \\`);
+      lines.push(`  -v /app/data/${name}:${sub.volume || "/data"} \\`);
+      lines.push(`  ${sub.image}`);
+      lines.push("");
+    }
+
+    lines.push("sleep 5");
+    lines.push("");
+
+    // Discover IPs and render nginx config
+    lines.push("# Discover sub-container IPs on the cloudron network");
+    for (const sub of config.subcontainers) {
+      const name = "fp-" + sub.image.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-");
+      const varName = name.replace(/-/g, "_").toUpperCase() + "_IP";
+      lines.push(`${varName}=$(docker inspect ${name} --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')`);
+      lines.push(`echo "=> ${sub.image} IP: \${${varName}}"`);
+    }
+    lines.push("");
+
+    // Render nginx config from template
+    lines.push("# Render nginx config with discovered IPs");
+    let sedCmd = "sed";
+    for (const sub of config.subcontainers) {
+      const name = "fp-" + sub.image.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-");
+      const varName = name.replace(/-/g, "_").toUpperCase() + "_IP";
+      const placeholder = name.toUpperCase().replace(/-/g, "_") + "_IP";
+      sedCmd += ` -e "s/${placeholder}/\${${varName}}/g"`;
+    }
+    lines.push(`${sedCmd} /app/code/nginx.conf.template > /tmp/nginx.conf`);
+    lines.push("");
+
+    lines.push("# Start nginx reverse proxy");
+    lines.push('nginx -c /tmp/nginx.conf -g "daemon off;" &');
+    lines.push("");
+    lines.push("wait");
+  } else if (hasServices) {
     // Multi-service mode: start all services + nginx reverse proxy
     lines.push("# Forward signals to all children");
     lines.push("trap 'kill $(jobs -p) 2>/dev/null; wait' TERM INT");
@@ -807,6 +886,58 @@ export function generateDeployCmd() {
  * Only used when config.services has entries with routePaths.
  */
 export function generateNginxConf(config) {
+  const hasSubcontainers = config.subcontainers && config.subcontainers.length > 0;
+
+  // DooD mode: generate nginx template with IP placeholders
+  if (hasSubcontainers) {
+    const lines = [];
+    lines.push("worker_processes 1;");
+    lines.push("error_log /dev/stderr;");
+    lines.push("pid /tmp/nginx.pid;");
+    lines.push("");
+    lines.push("events { worker_connections 64; }");
+    lines.push("");
+    lines.push("http {");
+    lines.push("  access_log /dev/stdout;");
+    lines.push("  client_body_temp_path /tmp/nginx_client_body;");
+    lines.push("  proxy_temp_path /tmp/nginx_proxy;");
+    lines.push("  fastcgi_temp_path /tmp/nginx_fastcgi;");
+    lines.push("  uwsgi_temp_path /tmp/nginx_uwsgi;");
+    lines.push("  scgi_temp_path /tmp/nginx_scgi;");
+    lines.push("");
+    lines.push("  server {");
+    assertSafePort(config.httpPort, "nginx DooD listen port");
+    lines.push(`    listen ${config.httpPort};`);
+    lines.push("");
+
+    for (const sub of config.subcontainers) {
+      const name = "fp-" + sub.image.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-");
+      const placeholder = name.toUpperCase().replace(/-/g, "_") + "_IP";
+      const route = (sub.route || "/").endsWith("/") ? sub.route : sub.route + "/";
+      lines.push(`    # ${sub.image} → sub-container (DooD)`);
+      lines.push(`    location ${route} {`);
+      lines.push(`      proxy_pass http://${placeholder}:${sub.port || 80}/;`);
+      lines.push("      proxy_set_header Host $host;");
+      lines.push("      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;");
+      lines.push("      proxy_http_version 1.1;");
+      lines.push('      proxy_set_header Upgrade $http_upgrade;');
+      lines.push('      proxy_set_header Connection "upgrade";');
+      lines.push("    }");
+      lines.push("");
+    }
+
+    // Default location
+    lines.push("    location / {");
+    lines.push("      default_type text/html;");
+    const links = config.subcontainers.map(s => `<li><a href="${s.route || "/"}">${s.image}</a></li>`).join("");
+    lines.push(`      return 200 '<h1>${config.title || "DooD App"}</h1><ul>${links}</ul>';`);
+    lines.push("    }");
+
+    lines.push("  }");
+    lines.push("}");
+    return lines.join("\n") + "\n";
+  }
+
   if (!config.services || config.services.length === 0) return "";
 
   const lines = [];

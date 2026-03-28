@@ -653,6 +653,16 @@
       </details>
 
       <details>
+        <summary>Sub-containers (DooD — advanced)</summary>
+        <p>Run separate Docker images as sub-containers inside your Cloudron app. Each runs in its own isolated container with its own dependencies. Requires the Docker addon.</p>
+        <div id="subcontainers-list"></div>
+        <button type="button" class="add-port-btn" id="add-subcontainer" aria-label="Add Docker sub-container">Add sub-container</button>
+        <div id="dood-warning" style="display: none;" class="warning" aria-live="polite">
+          Sub-containers use the Docker addon and run alongside your app. Data is stored in /app/data/ for Cloudron backup. Resource limits are enforced.
+        </div>
+      </details>
+
+      <details>
         <summary>Customize ports</summary>
         <h4>Extra HTTP Ports (separate subdomains)</h4>
         <div id="http-ports-list"></div>

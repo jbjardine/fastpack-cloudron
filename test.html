@@ -1387,6 +1387,52 @@
     assertNotIncludes("readme: no env section without addons", noEnvReadme, "Environment Variables");
 
     // ========================================
+    // DooD mode (sub-containers)
+    // ========================================
+    addSuite("DooD mode — sub-containers");
+
+    const doodConfig = {
+      ...safeConfig,
+      subcontainers: [
+        { image: "n8nio/n8n", port: 5678, route: "/n8n", memory: 512, volume: "/home/node/.n8n" },
+        { image: "kennethreitz/httpbin", port: 80, route: "/api", memory: 256, volume: "/data" },
+      ],
+    };
+
+    // Dockerfile includes Docker CLI
+    const doodDockerfile = generateDockerfile(doodConfig);
+    assertIncludes("dood: Dockerfile has Docker CLI", doodDockerfile, "docker-27");
+    assertIncludes("dood: Dockerfile has nginx", doodDockerfile, "nginx");
+    assertIncludes("dood: Dockerfile has nginx template", doodDockerfile, "nginx.conf.template");
+
+    // start.sh has docker run commands
+    const doodStartSh = generateStartSh(doodConfig);
+    assertIncludes("dood: start.sh exports DOCKER_HOST", doodStartSh, "CLOUDRON_DOCKER_HOST");
+    assertIncludes("dood: start.sh runs n8n", doodStartSh, "n8nio/n8n");
+    assertIncludes("dood: start.sh has memory limit", doodStartSh, "--memory=512m");
+    assertIncludes("dood: start.sh has volume mount", doodStartSh, "/app/data/fp-n8nio-n8n");
+    assertIncludes("dood: start.sh discovers IP", doodStartSh, "docker inspect");
+    assertIncludes("dood: start.sh renders nginx template", doodStartSh, "nginx.conf.template");
+    assertIncludes("dood: start.sh has cleanup trap", doodStartSh, "trap cleanup");
+
+    // nginx.conf has placeholders
+    const doodNginx = generateNginxConf(doodConfig);
+    assertIncludes("dood: nginx has n8n placeholder", doodNginx, "FP_N8NIO_N8N_IP");
+    assertIncludes("dood: nginx has httpbin placeholder", doodNginx, "FP_KENNETHREITZ_HTTPBIN_IP");
+    assertIncludes("dood: nginx routes /n8n/", doodNginx, "location /n8n/");
+    assertIncludes("dood: nginx routes /api/", doodNginx, "location /api/");
+    assertIncludes("dood: nginx has websocket upgrade", doodNginx, "Upgrade");
+
+    // manifest has docker addon
+    const doodManifest = JSON.parse(generateManifest(doodConfig));
+    assert("dood: manifest has docker addon", "docker" in doodManifest.addons, true);
+
+    // No DooD without subcontainers
+    const noDoodConfig = { ...safeConfig, subcontainers: [] };
+    const noDoodDockerfile = generateDockerfile(noDoodConfig);
+    assertNotIncludes("no-dood: Dockerfile has no Docker CLI", noDoodDockerfile, "docker-27");
+
+    // ========================================
     // Summary
     // ========================================
     const total = passed + failed;

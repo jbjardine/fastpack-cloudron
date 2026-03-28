@@ -223,6 +223,22 @@ function buildConfig() {
     });
   }
 
+  // Collect sub-container rows (DooD mode)
+  const subcontainers = [];
+  const subRows = document.querySelectorAll('.subcontainer-row');
+  for (const row of subRows) {
+    const img = row.querySelector('.sub-image').value.trim();
+    if (img) {
+      subcontainers.push({
+        image: img,
+        port: parseInt(row.querySelector('.sub-port').value, 10) || 80,
+        route: row.querySelector('.sub-route').value.trim() || '/',
+        memory: parseInt(row.querySelector('.sub-memory').value, 10) || 256,
+        volume: row.querySelector('.sub-volume').value.trim() || '/data',
+      });
+    }
+  }
+
   // Parse comma-separated directory lists
   const parseDirs = (el) => el.value.trim().split(',').map(s => s.trim()).filter(s => s.length > 0);
 
@@ -303,6 +319,8 @@ function buildConfig() {
     copyFrom: copyFrom.filter(cf => cf.image && cf.src && cf.dest),
     // Multi-service
     services,
+    // DooD sub-containers
+    subcontainers,
   };
 }
 
@@ -971,6 +989,70 @@ function addServiceRow() {
 }
 
 /**
+ * Adds a sub-container row (DooD mode) to the subcontainers list.
+ */
+function addSubcontainerRow() {
+  const container = document.getElementById('subcontainers-list');
+
+  const row = document.createElement('div');
+  row.className = 'service-row subcontainer-row';
+
+  const imageInput = document.createElement('input');
+  imageInput.type = 'text';
+  imageInput.className = 'sub-image';
+  imageInput.placeholder = 'Docker image (e.g., n8nio/n8n)';
+
+  const portInput = document.createElement('input');
+  portInput.type = 'number';
+  portInput.className = 'sub-port';
+  portInput.placeholder = 'Port';
+
+  const routeInput = document.createElement('input');
+  routeInput.type = 'text';
+  routeInput.className = 'sub-route';
+  routeInput.placeholder = 'Route (e.g., /n8n)';
+
+  const memInput = document.createElement('input');
+  memInput.type = 'number';
+  memInput.className = 'sub-memory';
+  memInput.placeholder = 'Memory MB (256)';
+  memInput.value = '256';
+
+  const volumeInput = document.createElement('input');
+  volumeInput.type = 'text';
+  volumeInput.className = 'sub-volume';
+  volumeInput.placeholder = 'Container data path (e.g., /data)';
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'remove-port';
+  removeBtn.setAttribute('aria-label', 'Remove sub-container');
+  removeBtn.textContent = '\u2715';
+
+  imageInput.addEventListener('input', updatePreview);
+  portInput.addEventListener('input', updatePreview);
+  routeInput.addEventListener('input', updatePreview);
+  memInput.addEventListener('input', updatePreview);
+  volumeInput.addEventListener('input', updatePreview);
+
+  removeBtn.addEventListener('click', function () {
+    row.remove();
+    updatePreview();
+  });
+
+  row.appendChild(imageInput);
+  row.appendChild(portInput);
+  row.appendChild(routeInput);
+  row.appendChild(memInput);
+  row.appendChild(volumeInput);
+  row.appendChild(removeBtn);
+
+  container.appendChild(row);
+  document.getElementById('dood-warning').style.display = '';
+  updatePreview();
+}
+
+/**
  * Marks a field as user-edited so auto-generation skips it.
  */
 function markUserEdited(e) {
@@ -1035,6 +1117,11 @@ document.addEventListener('DOMContentLoaded', function () {
   // Add service button
   document.getElementById('add-service').addEventListener('click', function () {
     addServiceRow();
+  });
+
+  // Add sub-container button (DooD)
+  document.getElementById('add-subcontainer').addEventListener('click', function () {
+    addSubcontainerRow();
   });
 
   // Download button
