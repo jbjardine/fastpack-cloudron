@@ -646,6 +646,8 @@ export function fpApp() {
     _previews: {},
     _downloading: false,
     _copyFeedback: '',
+    _showDeployWizard: false,
+    _zipFilename: '',
 
     // Guided mode checkbox states (controls progressive disclosure)
     _showDatabase: false,
@@ -889,6 +891,8 @@ export function fpApp() {
         const blob = await zip.generateAsync({ type: 'blob' });
         const filename = `${sanitizeImageName(config.image) || 'cloudron-app'}-cloudron.zip`;
         saveAs(blob, filename);
+        this._zipFilename = filename;
+        this._showDeployWizard = true;
       } finally {
         this._downloading = false;
       }

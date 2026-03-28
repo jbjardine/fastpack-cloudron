@@ -418,6 +418,101 @@
       min-height: 100px;
     }
 
+    /* ===== Deploy Wizard ===== */
+    .fp-deploy-wizard {
+      border: 2px solid var(--fp-success);
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin-top: 1.25rem;
+      background: var(--fp-surface);
+    }
+
+    .fp-deploy-wizard-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .fp-deploy-wizard-icon { font-size: 1.2rem; }
+
+    .fp-deploy-wizard-close {
+      margin-left: auto;
+      background: none;
+      border: none;
+      font-size: 1.3rem;
+      cursor: pointer;
+      color: var(--fp-text-muted);
+    }
+
+    .fp-deploy-wizard-subtitle {
+      color: var(--fp-text-muted);
+      margin: 0 0 1rem;
+      font-size: 0.9rem;
+    }
+
+    .fp-deploy-wizard-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .fp-deploy-wizard-step {
+      display: flex;
+      gap: 0.75rem;
+      align-items: flex-start;
+    }
+
+    .fp-deploy-wizard-num {
+      background: var(--fp-primary);
+      color: white;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      font-weight: 700;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .fp-deploy-wizard-label {
+      font-size: 0.9rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .fp-deploy-wizard-cmd {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 0.5rem 0.75rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      margin: 0.25rem 0;
+      cursor: pointer;
+      user-select: all;
+      white-space: pre;
+      overflow-x: auto;
+    }
+
+    .fp-deploy-wizard-cmd:hover { outline: 2px solid var(--fp-primary); }
+
+    .fp-deploy-wizard-copy {
+      font-size: 0.75rem;
+      color: var(--fp-text-muted);
+    }
+
+    .fp-deploy-wizard-details {
+      margin-top: 1rem;
+      font-size: 0.85rem;
+    }
+
+    .fp-deploy-wizard-details summary {
+      cursor: pointer;
+      color: var(--fp-primary);
+    }
+
     /* ===== Warnings & Errors ===== */
     .fp-warning {
       background: #fff3cd;
@@ -636,6 +731,38 @@
         <button type="button" class="fp-cta" @click="downloadZip()" :disabled="_downloading" :aria-busy="_downloading">
           <span x-text="_downloading ? 'Generating...' : 'Download ZIP'"></span>
         </button>
+
+        <!-- Deploy Wizard (shown after download) -->
+        <div class="fp-deploy-wizard" x-show="_showDeployWizard" x-transition aria-live="polite">
+          <div class="fp-deploy-wizard-header">
+            <span class="fp-deploy-wizard-icon">&#9989;</span>
+            <strong>Package downloaded!</strong>
+            <button type="button" class="fp-deploy-wizard-close" @click="_showDeployWizard = false" aria-label="Close">&times;</button>
+          </div>
+          <p class="fp-deploy-wizard-subtitle">Deploy to your Cloudron in 2 commands:</p>
+          <div class="fp-deploy-wizard-steps">
+            <div class="fp-deploy-wizard-step">
+              <span class="fp-deploy-wizard-num">1</span>
+              <div>
+                <div class="fp-deploy-wizard-label">Extract the ZIP and open a terminal in the folder</div>
+              </div>
+            </div>
+            <div class="fp-deploy-wizard-step">
+              <span class="fp-deploy-wizard-num">2</span>
+              <div>
+                <div class="fp-deploy-wizard-label">Login and install</div>
+                <pre class="fp-deploy-wizard-cmd" @click="navigator.clipboard.writeText('cloudron login my.example.com\ncloudron install')">cloudron login my.example.com
+cloudron install</pre>
+                <span class="fp-deploy-wizard-copy">click to copy</span>
+              </div>
+            </div>
+          </div>
+          <details class="fp-deploy-wizard-details">
+            <summary>First time? Install the Cloudron CLI</summary>
+            <pre class="fp-deploy-wizard-cmd" @click="navigator.clipboard.writeText('npm install -g cloudron')">npm install -g cloudron</pre>
+            <p style="font-size:0.8rem;color:var(--fp-text-muted);margin-top:0.5rem;">Requires <a href="https://nodejs.org" target="_blank" rel="noopener">Node.js</a>. See <a href="https://docs.cloudron.io/packaging/cli/" target="_blank" rel="noopener">Cloudron CLI docs</a>.</p>
+          </details>
+        </div>
 
         <!-- Mode Toggle -->
         <div class="fp-mode-toggle">
@@ -1190,6 +1317,38 @@
               <span x-text="_downloading ? 'Generating...' : 'Download ZIP'"></span>
             </button>
             <a @click="switchToGuided()" style="color:var(--fp-primary);cursor:pointer;white-space:nowrap;" role="button" tabindex="0" @keydown.enter="switchToGuided()">Guided mode</a>
+          </div>
+
+          <!-- Deploy Wizard (shown after download) -->
+          <div class="fp-deploy-wizard" x-show="_showDeployWizard" x-transition aria-live="polite">
+            <div class="fp-deploy-wizard-header">
+              <span class="fp-deploy-wizard-icon">&#9989;</span>
+              <strong>Package downloaded!</strong>
+              <button type="button" class="fp-deploy-wizard-close" @click="_showDeployWizard = false" aria-label="Close">&times;</button>
+            </div>
+            <p class="fp-deploy-wizard-subtitle">Deploy to your Cloudron in 2 commands:</p>
+            <div class="fp-deploy-wizard-steps">
+              <div class="fp-deploy-wizard-step">
+                <span class="fp-deploy-wizard-num">1</span>
+                <div>
+                  <div class="fp-deploy-wizard-label">Extract the ZIP and open a terminal in the folder</div>
+                </div>
+              </div>
+              <div class="fp-deploy-wizard-step">
+                <span class="fp-deploy-wizard-num">2</span>
+                <div>
+                  <div class="fp-deploy-wizard-label">Login and install</div>
+                  <pre class="fp-deploy-wizard-cmd" @click="navigator.clipboard.writeText('cloudron login my.example.com\ncloudron install')">cloudron login my.example.com
+cloudron install</pre>
+                  <span class="fp-deploy-wizard-copy">click to copy</span>
+                </div>
+              </div>
+            </div>
+            <details class="fp-deploy-wizard-details">
+              <summary>First time? Install the Cloudron CLI</summary>
+              <pre class="fp-deploy-wizard-cmd" @click="navigator.clipboard.writeText('npm install -g cloudron')">npm install -g cloudron</pre>
+              <p style="font-size:0.8rem;color:var(--fp-text-muted);margin-top:0.5rem;">Requires <a href="https://nodejs.org" target="_blank" rel="noopener">Node.js</a>. See <a href="https://docs.cloudron.io/packaging/cli/" target="_blank" rel="noopener">Cloudron CLI docs</a>.</p>
+            </details>
           </div>
 
           <!-- Preview Tabs -->
