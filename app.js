@@ -32,6 +32,7 @@ function buildConfig() {
   const versionEl = document.getElementById('app-version');
   const httpPortEl = document.getElementById('http-port');
   const healthCheckPathEl = document.getElementById('health-check-path');
+  const stackEl = document.getElementById('app-stack');
   const hasWebUI = document.getElementById('web-ui-yes').checked;
   const databaseEl = document.getElementById('database');
   const ssoEl = document.getElementById('sso');
@@ -231,6 +232,7 @@ function buildConfig() {
     httpPort,
     healthCheckPath,
     hasWebUI,
+    stack: stackEl.value,
     database,
     sso,
     addons,
@@ -1087,7 +1089,7 @@ document.addEventListener('DOMContentLoaded', function () {
     'app-author', 'app-tagline', 'app-description', 'app-website', 'app-contact-email',
     'app-configure-path', 'app-post-install-message', 'app-changelog', 'app-icon',
     'health-check-path', 'http-port', 'app-memory-limit',
-    'database', 'sso',
+    'app-stack', 'database', 'sso',
     'oidc-redirect-uri', 'oidc-logout-uri', 'oidc-token-algo',
     'proxyauth-path',
     'packager-name', 'packager-url', 'icon-url', 'media-links',

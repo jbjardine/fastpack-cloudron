@@ -48,6 +48,12 @@ function assertSafeRoutePath(value, context) {
   }
 }
 
+// Cloudron constants
+const CLOUDRON_UID = 808;
+const APP_CODE_DIR = "/app/code";
+const APP_DATA_DIR = "/app/data";
+const MANIFEST_VERSION = 2;
+
 // Re-export regex patterns for use by validation in app.js
 export { SAFE_DOCKER_REF, SAFE_PATH, SAFE_IDENTIFIER, SAFE_VERSION, SAFE_ROUTE_PATH };
 
@@ -96,7 +102,7 @@ export function generateManifest(config) {
   manifest.id = config.id;
   manifest.title = config.title;
   manifest.version = config.version;
-  manifest.manifestVersion = 2;
+  manifest.manifestVersion = MANIFEST_VERSION;
   manifest.healthCheckPath = config.healthCheckPath || "/";
   manifest.httpPort = config.httpPort;
 
@@ -337,11 +343,11 @@ export function generateDockerfile(config) {
     if id cloudron >/dev/null 2>&1; then \\
       echo "cloudron user already exists"; \\
     elif command -v groupadd >/dev/null 2>&1; then \\
-      groupadd -r -g 808 cloudron; \\
-      useradd -r -u 808 -g 808 -d /home/cloudron -m cloudron; \\
+      groupadd -r -g ${CLOUDRON_UID} cloudron; \\
+      useradd -r -u ${CLOUDRON_UID} -g ${CLOUDRON_UID} -d /home/cloudron -m cloudron; \\
     elif command -v addgroup >/dev/null 2>&1; then \\
-      addgroup -g 808 -S cloudron; \\
-      adduser -u 808 -S -G cloudron -h /home/cloudron cloudron; \\
+      addgroup -g ${CLOUDRON_UID} -S cloudron; \\
+      adduser -u ${CLOUDRON_UID} -S -G cloudron -h /home/cloudron cloudron; \\
     fi`);
   lines.push("");
   lines.push("# Install gosu (or su-exec fallback) only when the base image supports it");
@@ -424,6 +430,41 @@ export function generateDockerfile(config) {
 }
 
 /**
+ * Returns the app start command and comment based on the selected stack.
+ */
+function getStackCommand(stack, httpPort) {
+  switch (stack) {
+    case "nodejs":
+      return {
+        command: "node /app/code/server.js",
+        comment: "Adjust path to your Node.js entry point",
+      };
+    case "php":
+      return {
+        command: "apache2-foreground",
+        comment: "Apache serves PHP from /app/code on port " + httpPort,
+      };
+    case "python":
+      return {
+        command: `python3 /app/code/app.py`,
+        comment: "Adjust path to your Python entry point (e.g., gunicorn, uvicorn)",
+      };
+    case "java":
+      return {
+        command: "java -XX:MaxRAMPercentage=75.0 -jar /app/code/app.jar",
+        comment: "Adjust jar path; MaxRAMPercentage respects Cloudron memory limits",
+      };
+    case "go":
+      return {
+        command: "/app/code/server",
+        comment: "Path to your compiled Go binary",
+      };
+    default:
+      return { command: "YOUR_APP_COMMAND", comment: "" };
+  }
+}
+
+/**
  * Generates start.sh content.
  * Fix #1/#4: use gosu for non-root execution
  * Fix #2: minimal healthcheck handler (no filesystem exposure)
@@ -472,8 +513,10 @@ export function generateStartSh(config) {
     lines.push("wait");
   } else if (config.hasWebUI) {
     // Single process — exec + gosu ensures SIGTERM reaches the app
+    const stackCmd = getStackCommand(config.stack, config.httpPort);
     lines.push("# Start the application (exec ensures SIGTERM is forwarded)");
-    lines.push("exec /usr/local/bin/gosu cloudron:cloudron YOUR_APP_COMMAND");
+    if (stackCmd.comment) lines.push("# " + stackCmd.comment);
+    lines.push(`exec /usr/local/bin/gosu cloudron:cloudron ${stackCmd.command}`);
   } else {
     // Background service + minimal healthcheck + wait
     lines.push("# Forward signals to child processes");
@@ -481,7 +524,9 @@ export function generateStartSh(config) {
     lines.push("");
     lines.push("# Start the service in the background");
     lines.push("# Ensure your service logs to stdout/stderr for Cloudron log integration");
-    lines.push("/usr/local/bin/gosu cloudron:cloudron YOUR_SERVICE_COMMAND &");
+    const bgCmd = getStackCommand(config.stack, config.httpPort);
+    if (bgCmd.comment) lines.push("# " + bgCmd.comment);
+    lines.push(`/usr/local/bin/gosu cloudron:cloudron ${bgCmd.command} &`);
     lines.push("");
     lines.push("# Minimal health check endpoint (returns 200 OK)");
     assertSafePort(config.httpPort, "start.sh healthcheck port");
@@ -590,6 +635,41 @@ export function generateReadme(config) {
     lines.push(
       "- This package runs in TCP-only mode. A minimal Python health-check server listens on the HTTP port so Cloudron can verify the app is running."
     );
+  }
+
+  // Environment variable reference per addon
+  const envVars = [];
+  if (config.database === "postgresql") envVars.push("- `CLOUDRON_POSTGRESQL_URL` — PostgreSQL connection string");
+  if (config.database === "mysql") envVars.push("- `CLOUDRON_MYSQL_URL` — MySQL connection string");
+  if (config.database === "mongodb") envVars.push("- `CLOUDRON_MONGODB_URL` — MongoDB connection string");
+  if (config.database === "redis") envVars.push("- `CLOUDRON_REDIS_URL` — Redis connection URL");
+  if (config.sso === "oidc") {
+    envVars.push("- `CLOUDRON_OIDC_IDENTIFIER` — OIDC client ID");
+    envVars.push("- `CLOUDRON_OIDC_SECRET` — OIDC client secret");
+    envVars.push("- `CLOUDRON_OIDC_ISSUER` — OIDC issuer URL");
+  }
+  if (config.sso === "ldap") {
+    envVars.push("- `CLOUDRON_LDAP_URL` — LDAP server URL");
+    envVars.push("- `CLOUDRON_LDAP_BIND_DN` — LDAP bind DN");
+    envVars.push("- `CLOUDRON_LDAP_BIND_PASSWORD` — LDAP bind password");
+    envVars.push("- `CLOUDRON_LDAP_USERS_BASE_DN` — LDAP users search base");
+  }
+  if (config.addons && config.addons.includes("sendmail")) {
+    envVars.push("- `CLOUDRON_MAIL_SMTP_SERVER` — SMTP server host");
+    envVars.push("- `CLOUDRON_MAIL_SMTP_PORT` — SMTP port");
+    envVars.push("- `CLOUDRON_MAIL_SMTP_USERNAME` — SMTP username");
+    envVars.push("- `CLOUDRON_MAIL_SMTP_PASSWORD` — SMTP password");
+  }
+  if (config.addons && config.addons.includes("localstorage")) {
+    envVars.push("- `/app/data` — Persistent storage directory (survives updates)");
+  }
+  if (envVars.length > 0) {
+    lines.push("");
+    lines.push("## Environment Variables");
+    lines.push("");
+    lines.push("Cloudron injects these variables at runtime:");
+    lines.push("");
+    for (const v of envVars) lines.push(v);
   }
 
   return lines.join("\n") + "\n";

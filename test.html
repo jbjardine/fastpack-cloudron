@@ -1330,6 +1330,63 @@
     assertIncludes("changelog: initial", changelog, "Initial Cloudron package");
 
     // ========================================
+    // Stack-specific start.sh templates
+    // ========================================
+    addSuite("Stack-specific start.sh templates");
+
+    const nodejsConfig = { ...safeConfig, stack: "nodejs" };
+    const nodejsSh = generateStartSh(nodejsConfig);
+    assertIncludes("nodejs: node command", nodejsSh, "node /app/code/server.js");
+    assertNotIncludes("nodejs: no YOUR_APP_COMMAND", nodejsSh, "YOUR_APP_COMMAND");
+
+    const phpConfig = { ...safeConfig, stack: "php" };
+    const phpSh = generateStartSh(phpConfig);
+    assertIncludes("php: apache2-foreground", phpSh, "apache2-foreground");
+
+    const javaConfig = { ...safeConfig, stack: "java" };
+    const javaSh = generateStartSh(javaConfig);
+    assertIncludes("java: MaxRAMPercentage", javaSh, "MaxRAMPercentage");
+    assertIncludes("java: app.jar", javaSh, "app.jar");
+
+    const goConfig = { ...safeConfig, stack: "go" };
+    const goSh = generateStartSh(goConfig);
+    assertIncludes("go: /app/code/server", goSh, "/app/code/server");
+
+    const pythonConfig = { ...safeConfig, stack: "python" };
+    const pythonSh = generateStartSh(pythonConfig);
+    assertIncludes("python: python3 /app/code/app.py", pythonSh, "python3 /app/code/app.py");
+
+    const genericConfig = { ...safeConfig, stack: "" };
+    const genericSh = generateStartSh(genericConfig);
+    assertIncludes("generic: YOUR_APP_COMMAND placeholder", genericSh, "YOUR_APP_COMMAND");
+
+    // ========================================
+    // Env var reference in README
+    // ========================================
+    addSuite("Env var reference in README");
+
+    const pgReadme = generateReadme({ ...safeConfig, database: "postgresql" });
+    assertIncludes("readme: CLOUDRON_POSTGRESQL_URL", pgReadme, "CLOUDRON_POSTGRESQL_URL");
+
+    const mysqlReadme = generateReadme({ ...safeConfig, database: "mysql" });
+    assertIncludes("readme: CLOUDRON_MYSQL_URL", mysqlReadme, "CLOUDRON_MYSQL_URL");
+
+    const oidcReadme = generateReadme({ ...safeConfig, sso: "oidc" });
+    assertIncludes("readme: CLOUDRON_OIDC_IDENTIFIER", oidcReadme, "CLOUDRON_OIDC_IDENTIFIER");
+
+    const ldapReadme = generateReadme({ ...safeConfig, sso: "ldap" });
+    assertIncludes("readme: CLOUDRON_LDAP_URL", ldapReadme, "CLOUDRON_LDAP_URL");
+
+    const smReadme = generateReadme({ ...safeConfig, addons: ["sendmail"] });
+    assertIncludes("readme: CLOUDRON_MAIL_SMTP_SERVER", smReadme, "CLOUDRON_MAIL_SMTP_SERVER");
+
+    const lsReadme = generateReadme({ ...safeConfig, addons: ["localstorage"] });
+    assertIncludes("readme: /app/data", lsReadme, "/app/data");
+
+    const noEnvReadme = generateReadme({ ...safeConfig, database: null, sso: null, addons: [] });
+    assertNotIncludes("readme: no env section without addons", noEnvReadme, "Environment Variables");
+
+    // ========================================
     // Summary
     // ========================================
     const total = passed + failed;

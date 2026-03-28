@@ -245,6 +245,9 @@
       margin-bottom: 0.5rem;
     }
 
+    fieldset { border: none; padding: 0; margin: 0 0 1rem 0; }
+    legend { font-weight: 600; margin-bottom: 0.25rem; }
+
     /* Focus indicators (WCAG 2.4.7) */
     input:focus-visible, select:focus-visible, textarea:focus-visible,
     button:focus-visible, summary:focus-visible, [role="tab"]:focus-visible {
@@ -328,22 +331,22 @@
         </select>
       </div>
 
-      <div id="mysql-options-group" style="display: none;">
+      <div id="mysql-options-group" style="display: none;" aria-live="polite">
         <div class="checkbox-grid">
           <label><input type="checkbox" id="mysql-multiple-dbs"> Multiple databases</label>
         </div>
       </div>
-      <div id="mongodb-options-group" style="display: none;">
+      <div id="mongodb-options-group" style="display: none;" aria-live="polite">
         <div class="checkbox-grid">
           <label><input type="checkbox" id="mongodb-oplog"> Oplog access</label>
         </div>
       </div>
-      <div id="redis-options-group" style="display: none;">
+      <div id="redis-options-group" style="display: none;" aria-live="polite">
         <div class="checkbox-grid">
           <label><input type="checkbox" id="redis-no-password"> Disable authentication (noPassword)</label>
         </div>
       </div>
-      <div id="postgresql-options-group" style="display: none;">
+      <div id="postgresql-options-group" style="display: none;" aria-live="polite">
         <div class="form-group">
           <label for="postgresql-locale">Locale</label>
           <input type="text" id="postgresql-locale" placeholder="e.g., en_US.utf8">
@@ -362,7 +365,7 @@
         </select>
       </div>
 
-      <div id="proxyauth-options-group" style="display: none;">
+      <div id="proxyauth-options-group" style="display: none;" aria-live="polite">
         <div class="form-group">
           <label for="proxyauth-path">Auth Path (restrict to subset, use ! to exclude)</label>
           <input type="text" id="proxyauth-path" placeholder="e.g., /admin or !/webhooks">
@@ -374,19 +377,31 @@
       </div>
 
       <div class="form-group">
-        <label>Web Interface</label>
+        <label for="app-stack">Application Stack (pre-fills start.sh template)</label>
+        <select id="app-stack">
+          <option value="">Generic (manual)</option>
+          <option value="nodejs">Node.js</option>
+          <option value="php">Apache + PHP</option>
+          <option value="python">Python</option>
+          <option value="java">Java</option>
+          <option value="go">Go</option>
+        </select>
+      </div>
+
+      <fieldset class="form-group">
+        <legend>Web Interface</legend>
         <div class="radio-group">
           <label><input type="radio" name="web-ui" id="web-ui-yes" value="yes" checked> Yes</label>
           <label><input type="radio" name="web-ui" id="web-ui-no" value="no"> No</label>
         </div>
-      </div>
+      </fieldset>
 
       <details>
         <summary>Customize metadata</summary>
         <div class="form-group">
           <label for="app-id">App ID</label>
-          <input type="text" id="app-id" placeholder="io.fastpack.myapp">
-          <span class="field-error" data-error-for="app-id"></span>
+          <input type="text" id="app-id" placeholder="io.fastpack.myapp" aria-describedby="err-app-id">
+          <span class="field-error" data-error-for="app-id" id="err-app-id"></span>
         </div>
         <div class="form-group">
           <label for="app-title">Title</label>
@@ -438,13 +453,13 @@
         </div>
         <div class="form-group">
           <label for="health-check-path">Health Check Path</label>
-          <input type="text" id="health-check-path" value="/">
-          <span class="field-error" data-error-for="health-check-path"></span>
+          <input type="text" id="health-check-path" value="/" aria-describedby="err-health-check-path">
+          <span class="field-error" data-error-for="health-check-path" id="err-health-check-path"></span>
         </div>
         <div class="form-group" id="http-port-group">
           <label for="http-port">HTTP Port</label>
-          <input type="number" id="http-port" value="8000">
-          <span class="field-error" data-error-for="http-port"></span>
+          <input type="number" id="http-port" value="8000" aria-describedby="err-http-port">
+          <span class="field-error" data-error-for="http-port" id="err-http-port"></span>
         </div>
         <div class="form-group">
           <label for="app-memory-limit">Memory Limit (MB)</label>
@@ -641,7 +656,7 @@
         <div id="udp-ports-list"></div>
         <button type="button" class="add-port-btn" id="add-udp-port" aria-label="Add UDP port">Add UDP port</button>
 
-        <span class="field-error" data-error-for="ports"></span>
+        <span class="field-error" data-error-for="ports" id="err-ports" aria-live="polite"></span>
       </details>
 
       <div id="errors" role="alert" aria-live="assertive"></div>
