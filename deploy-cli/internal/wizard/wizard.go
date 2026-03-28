@@ -139,8 +139,8 @@ func isDevInstance(rawURL string) bool {
 		return false
 	}
 	host := u.Hostname()
-	return strings.Contains(host, ".nip.io") ||
-		strings.HasSuffix(host, ".nip.io") ||
+	return strings.HasSuffix(host, ".nip.io") ||
+		host == "nip.io" ||
 		host == "localhost" ||
 		strings.HasPrefix(host, "192.168.") ||
 		strings.HasPrefix(host, "10.")

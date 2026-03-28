@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -266,6 +267,144 @@ func TestInstallApp_MissingManifest(t *testing.T) {
 	_, err := c.InstallApp("/nonexistent", "img:v1", "sub")
 	if err == nil {
 		t.Fatal("expected file not found error")
+	}
+}
+
+// === MUTATION-KILLING TESTS ===
+
+func TestGetCloudronInfo_VerifiesAuthHeader(t *testing.T) {
+	// Mutation target: remove "Bearer " prefix or change token format
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer correct-token" {
+			t.Fatalf("expected 'Bearer correct-token', got %q", auth)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(CloudronInfo{Version: "8.0", DisplayName: "T", Domain: "t.com"})
+	}))
+	defer srv.Close()
+
+	c := &Client{baseURL: srv.URL, token: "correct-token", httpClient: srv.Client()}
+	_, err := c.GetCloudronInfo()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuildImage_VerifiesContentType(t *testing.T) {
+	// Mutation target: change or remove Content-Type header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ct := r.Header.Get("Content-Type")
+		if !strings.Contains(ct, "multipart/form-data") {
+			t.Fatalf("expected multipart/form-data Content-Type, got %q", ct)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"image": "img:v1"})
+	}))
+	defer srv.Close()
+
+	tmp := t.TempDir()
+	tarball := filepath.Join(tmp, "test.tar.gz")
+	os.WriteFile(tarball, []byte("data"), 0644)
+
+	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
+	_, err := c.BuildImage(tarball)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuildImage_ServerError500(t *testing.T) {
+	// Mutation target: remove non-2xx check
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+	}))
+	defer srv.Close()
+
+	tmp := t.TempDir()
+	tarball := filepath.Join(tmp, "test.tar.gz")
+	os.WriteFile(tarball, []byte("data"), 0644)
+
+	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
+	_, err := c.BuildImage(tarball)
+	if err == nil {
+		t.Fatal("expected error for 500")
+	}
+}
+
+func TestInstallApp_VerifiesJSONContentType(t *testing.T) {
+	// Mutation target: change Content-Type for InstallApp
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ct := r.Header.Get("Content-Type")
+		if ct != "application/json" {
+			t.Fatalf("expected application/json, got %q", ct)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"fqdn": "app.example.com"})
+	}))
+	defer srv.Close()
+
+	tmp := t.TempDir()
+	manifest := filepath.Join(tmp, "CloudronManifest.json")
+	os.WriteFile(manifest, []byte(`{"id":"test"}`), 0644)
+
+	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
+	_, err := c.InstallApp(manifest, "img:v1", "sub")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInstallApp_VerifiesPayloadStructure(t *testing.T) {
+	// Mutation target: change payload keys (location, manifest, image)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		json.NewDecoder(r.Body).Decode(&payload)
+
+		if _, ok := payload["manifest"]; !ok {
+			t.Fatal("payload missing 'manifest' key")
+		}
+		if payload["location"] != "myapp" {
+			t.Fatalf("location=%v", payload["location"])
+		}
+		if payload["image"] != "registry/app:v1" {
+			t.Fatalf("image=%v", payload["image"])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"fqdn": "myapp.example.com"})
+	}))
+	defer srv.Close()
+
+	tmp := t.TempDir()
+	manifest := filepath.Join(tmp, "CloudronManifest.json")
+	os.WriteFile(manifest, []byte(`{"id":"io.test"}`), 0644)
+
+	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
+	url, err := c.InstallApp(manifest, "registry/app:v1", "myapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if url != "https://myapp.example.com" {
+		t.Fatalf("url=%q", url)
+	}
+}
+
+func TestInstallApp_ServerError422(t *testing.T) {
+	// Test additional status codes beyond 409
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(422)
+	}))
+	defer srv.Close()
+
+	tmp := t.TempDir()
+	manifest := filepath.Join(tmp, "CloudronManifest.json")
+	os.WriteFile(manifest, []byte(`{"id":"test"}`), 0644)
+
+	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
+	_, err := c.InstallApp(manifest, "img:v1", "sub")
+	if err == nil {
+		t.Fatal("expected error for 422")
 	}
 }
 

@@ -197,6 +197,118 @@ func TestCreateTarball_Cleanup(t *testing.T) {
 	}
 }
 
+// === MUTATION-KILLING TESTS ===
+
+func TestCreateTarball_SizeLimitBoundary(t *testing.T) {
+	// Mutation target: MaxTarballSize changed to math.MaxInt64
+	// Verify the constant is actually 100MB
+	if MaxTarballSize != 100*1024*1024 {
+		t.Fatalf("MaxTarballSize=%d, want %d (100MB)", MaxTarballSize, 100*1024*1024)
+	}
+}
+
+func TestCreateTarball_FileContentPreserved(t *testing.T) {
+	// Mutation target: io.Copy replaced with no-op → files have zero content
+	dir := t.TempDir()
+	manifest := `{"id":"io.test.app","title":"Test","version":"1.0.0"}`
+	os.WriteFile(filepath.Join(dir, "CloudronManifest.json"), []byte(manifest), 0644)
+	os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM nginx:latest"), 0644)
+
+	tarPath, err := CreateTarball(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tarPath)
+
+	files := untar(t, tarPath)
+	if files["CloudronManifest.json"] != manifest {
+		t.Fatalf("manifest content not preserved: got %q", files["CloudronManifest.json"])
+	}
+	if files["Dockerfile"] != "FROM nginx:latest" {
+		t.Fatalf("Dockerfile content not preserved: got %q", files["Dockerfile"])
+	}
+}
+
+func TestCreateTarball_FileNamePreserved(t *testing.T) {
+	// Mutation target: header.Name changed to wrong value
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "CloudronManifest.json"), []byte(`{}`), 0644)
+	os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM a"), 0644)
+	os.WriteFile(filepath.Join(dir, "start.sh"), []byte("#!/bin/sh"), 0644)
+
+	tarPath, err := CreateTarball(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tarPath)
+
+	files := untar(t, tarPath)
+	expectedNames := []string{"CloudronManifest.json", "Dockerfile", "start.sh"}
+	for _, name := range expectedNames {
+		if _, ok := files[name]; !ok {
+			t.Fatalf("expected file %q in tarball, got files: %v", name, keys(files))
+		}
+	}
+}
+
+func TestCreateTarball_ExactAllowListEnforcement(t *testing.T) {
+	// Mutation target: allow-list expanded or made into wildcard
+	// Create every common dangerous file type and verify NONE are included
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "CloudronManifest.json"), []byte(`{}`), 0644)
+	os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM x"), 0644)
+
+	dangerous := []string{
+		".env", ".env.local", ".env.production",
+		".gitignore", ".git", "id_rsa", "id_rsa.pub",
+		"server.key", "server.pem", "server.crt",
+		"package.json", "package-lock.json",
+		"node_modules", "secrets.json", "config.json",
+		"NOTES.md", "TODO.md", "SECURITY.md",
+		"deploy.js", "deploy.cmd", "deploy.exe",
+		"random.txt", "data.csv",
+	}
+	for _, name := range dangerous {
+		os.WriteFile(filepath.Join(dir, name), []byte("sensitive"), 0644)
+	}
+
+	tarPath, err := CreateTarball(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tarPath)
+
+	files := untar(t, tarPath)
+	for name := range files {
+		if name != "CloudronManifest.json" && name != "Dockerfile" {
+			t.Fatalf("unexpected file %q in tarball — only allowed files should be included", name)
+		}
+	}
+}
+
+func TestCreateTarball_NonZeroTarball(t *testing.T) {
+	// Mutation target: gzip/tar writers not properly flushed
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "CloudronManifest.json"), []byte(`{}`), 0644)
+
+	tarPath, err := CreateTarball(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tarPath)
+
+	info, err := os.Stat(tarPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() == 0 {
+		t.Fatal("tarball file should not be empty")
+	}
+	if info.Size() < 20 {
+		t.Fatalf("tarball suspiciously small: %d bytes", info.Size())
+	}
+}
+
 func TestAllowedFiles(t *testing.T) {
 	files := AllowedFiles()
 	if len(files) == 0 {

@@ -237,6 +237,133 @@ func TestRunWithIO_SelfSignedFalsePositive(t *testing.T) {
 	}
 }
 
+// === MUTATION-KILLING TESTS ===
+// These tests are designed to catch specific mutations that would otherwise survive.
+
+func TestRunWithIO_NipIoFalsePositive(t *testing.T) {
+	// Mutation target: strings.Contains(host, ".nip.io") should NOT match
+	// domains that have ".nip.io" in the middle (e.g., evil.nip.io.attacker.com)
+	attackerURLs := []string{
+		"evil.nip.io.attacker.com",
+		"nip.io.evil.com",
+		"my.nip.io.co.uk",
+	}
+	for _, u := range attackerURLs {
+		t.Run(u, func(t *testing.T) {
+			in := strings.NewReader(u + "\ntoken\nsub\n")
+			out := new(bytes.Buffer)
+			cfg, err := RunWithIO(in, out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.AllowSelfSigned {
+				t.Fatalf("AllowSelfSigned should be false for attacker URL %s — nip.io in middle is NOT a dev instance", u)
+			}
+		})
+	}
+}
+
+func TestRunWithIO_NipIoTruePositive(t *testing.T) {
+	// Verify legitimate nip.io subdomains still trigger
+	legit := []string{"192.168.1.50.nip.io", "10.0.0.1.nip.io", "my.app.nip.io"}
+	for _, u := range legit {
+		t.Run(u, func(t *testing.T) {
+			in := strings.NewReader(u + "\ntoken\nsub\n")
+			out := new(bytes.Buffer)
+			cfg, err := RunWithIO(in, out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !cfg.AllowSelfSigned {
+				t.Fatalf("AllowSelfSigned should be true for legit nip.io URL %s", u)
+			}
+		})
+	}
+}
+
+func TestRunWithIO_WhitespaceTrimmingURL(t *testing.T) {
+	// Mutation target: remove TrimSpace(rawURL) → whitespace preserved in URL
+	in := strings.NewReader("  example.com  \ntoken\nsub\n")
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CloudronURL != "https://example.com" {
+		t.Fatalf("URL should be trimmed, got %q", cfg.CloudronURL)
+	}
+}
+
+func TestRunWithIO_WhitespaceTrimmingToken(t *testing.T) {
+	// Mutation target: remove TrimSpace(token) → whitespace in token
+	in := strings.NewReader("example.com\n  my-token  \nsub\n")
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Token != "my-token" {
+		t.Fatalf("token should be trimmed, got %q", cfg.Token)
+	}
+}
+
+func TestRunWithIO_WhitespaceTrimmingSubdomain(t *testing.T) {
+	// Mutation target: remove TrimSpace(subdomain) → whitespace in subdomain
+	in := strings.NewReader("example.com\ntoken\n  myapp  \n")
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Subdomain != "myapp" {
+		t.Fatalf("subdomain should be trimmed, got %q", cfg.Subdomain)
+	}
+}
+
+func TestRunWithIO_EOFImmediateEmpty(t *testing.T) {
+	// Mutation target: readLine EOF with len(line) > 0 changed to >= 0
+	// Empty EOF (Ctrl+D immediately) should return error, not empty string
+	in := strings.NewReader("")
+	out := new(bytes.Buffer)
+	_, err := RunWithIO(in, out)
+	if err == nil {
+		t.Fatal("empty EOF should return error, not proceed with empty input")
+	}
+}
+
+func TestRunWithIO_TokenWhitespaceOnly(t *testing.T) {
+	// Mutation target: remove TrimSpace → whitespace-only token passes validation
+	in := strings.NewReader("example.com\n   \n")
+	out := new(bytes.Buffer)
+	_, err := RunWithIO(in, out)
+	if err == nil || !strings.Contains(err.Error(), "token is required") {
+		t.Fatalf("whitespace-only token should be rejected, got %v", err)
+	}
+}
+
+func TestRunWithIO_SubdomainMaxLength(t *testing.T) {
+	// DNS subdomain label max length is 63 chars. Our regex enforces {0,61} + 2 chars = 63.
+	validMax := "a" + strings.Repeat("b", 61) + "c" // 63 chars
+	in := strings.NewReader("example.com\ntoken\n" + validMax + "\n")
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatalf("63-char subdomain should be valid: %v", err)
+	}
+	if cfg.Subdomain != validMax {
+		t.Fatalf("subdomain=%q", cfg.Subdomain)
+	}
+
+	// 64 chars should be rejected
+	tooLong := validMax + "d"
+	in2 := strings.NewReader("example.com\ntoken\n" + tooLong + "\n")
+	out2 := new(bytes.Buffer)
+	_, err = RunWithIO(in2, out2)
+	if err == nil {
+		t.Fatal("64-char subdomain should be rejected")
+	}
+}
+
 func TestValidSubdomainRegex(t *testing.T) {
 	valid := []string{"a", "ab", "a1", "my-app", "app123", "a-b-c"}
 	invalid := []string{"", "-a", "a-", "A", "a_b", "a b", ".a", "a.b"}
