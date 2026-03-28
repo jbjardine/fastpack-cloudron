@@ -44,6 +44,9 @@ func main() {
 	// Step 3: Verify connection to Cloudron
 	fmt.Print("🔗 Connecting to Cloudron... ")
 	client := api.NewClient(config.CloudronURL, config.Token, config.AllowSelfSigned)
+	if config.BuildServiceURL != "" {
+		client.SetBuildService(config.BuildServiceURL, config.BuildToken)
+	}
 	info, err := client.GetCloudronInfo()
 	if err != nil {
 		fatal("\n❌ Cannot connect: %v\nCheck your URL and API token.", err)

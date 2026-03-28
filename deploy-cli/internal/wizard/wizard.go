@@ -21,6 +21,8 @@ type Config struct {
 	Token           string
 	Subdomain       string
 	AllowSelfSigned bool
+	BuildServiceURL string
+	BuildToken      string
 }
 
 // Run executes the interactive wizard using stdin/stdout.
@@ -99,6 +101,38 @@ func RunWithIO(r io.Reader, w io.Writer) (*Config, error) {
 		return nil, fmt.Errorf("invalid subdomain %q: must contain only lowercase letters, digits, and hyphens", subdomain)
 	}
 	config.Subdomain = subdomain
+
+	// Build Service URL — check env var or prompt
+	envBuildURL := os.Getenv("CLOUDRON_BUILD_SERVICE_URL")
+	envBuildToken := os.Getenv("CLOUDRON_BUILD_TOKEN")
+	if envBuildURL != "" {
+		config.BuildServiceURL = envBuildURL
+		config.BuildToken = envBuildToken
+		fmt.Fprintln(w, "\n   Using Build Service from CLOUDRON_BUILD_SERVICE_URL environment variable.")
+	} else {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Step 4/4: Enter your Build Service URL (e.g., devtools.example.com)")
+		fmt.Fprintln(w, "   This is the Cloudron app that builds Docker images.")
+		fmt.Fprintln(w, "   Leave empty to skip (you'll need to build locally with Docker).")
+		fmt.Fprint(w, "   Build Service URL: ")
+		buildURL, err := readLine(reader)
+		if err != nil && err.Error() != "" {
+			// EOF is ok — optional field
+		}
+		buildURL = strings.TrimSpace(buildURL)
+		if buildURL != "" {
+			if !strings.HasPrefix(buildURL, "http://") && !strings.HasPrefix(buildURL, "https://") {
+				buildURL = "https://" + buildURL
+			}
+			buildURL = strings.TrimRight(buildURL, "/")
+			config.BuildServiceURL = buildURL
+
+			fmt.Fprint(w, "   Build Service Token (or press Enter to use Cloudron token): ")
+			bt, _ := readLine(reader)
+			bt = strings.TrimSpace(bt)
+			config.BuildToken = bt
+		}
+	}
 
 	// Self-signed cert detection — warn explicitly
 	if isDevInstance(rawURL) {

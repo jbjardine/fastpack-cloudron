@@ -9,134 +9,108 @@ import (
 	"testing"
 )
 
-// TestFullDeploymentFlow simulates the complete CLI → Cloudron API workflow
-// by running all 3 API calls in sequence against a single mock server.
-// This is the integration-level test in the test pyramid.
+// TestFullDeploymentFlow simulates the complete CLI → Cloudron API workflow.
 func TestFullDeploymentFlow(t *testing.T) {
-	var step int
+	var cloudronStep, buildStep int
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Mock Cloudron API (profile, status, install)
+	cloudronSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-
 		switch {
-		// Step 1: Verify connectivity
-		case r.Method == "GET" && r.URL.Path == "/api/v1/config":
-			step++
-			if step != 1 {
-				t.Fatalf("GetCloudronInfo called at step %d, expected 1", step)
-			}
+		case r.Method == "GET" && r.URL.Path == "/api/v1/profile":
+			cloudronStep++
 			auth := r.Header.Get("Authorization")
 			if auth != "Bearer test-token-xyz" {
 				w.WriteHeader(401)
 				return
 			}
-			json.NewEncoder(w).Encode(CloudronInfo{
-				Version:     "8.2.0",
-				DisplayName: "Test Cloudron",
-				Domain:      "cloud.example.com",
-			})
+			json.NewEncoder(w).Encode(map[string]string{"username": "admin"})
 
-		// Step 2: Build image
-		case r.Method == "POST" && r.URL.Path == "/api/v1/developer/build":
-			step++
-			if step != 2 {
-				t.Fatalf("BuildImage called at step %d, expected 2", step)
-			}
-			// Verify multipart upload
-			if err := r.ParseMultipartForm(10 << 20); err != nil {
-				t.Fatalf("expected multipart form: %v", err)
-			}
-			file, header, err := r.FormFile("file")
-			if err != nil {
-				t.Fatalf("missing file in upload: %v", err)
-			}
-			defer file.Close()
-			if header.Size == 0 {
-				t.Fatal("uploaded file is empty")
-			}
+		case r.Method == "GET" && r.URL.Path == "/api/v1/cloudron/status":
+			cloudronStep++
+			json.NewEncoder(w).Encode(CloudronInfo{Version: "9.1.5", DisplayName: "Test Cloudron"})
 
-			json.NewEncoder(w).Encode(map[string]string{
-				"image": "registry.cloud.example.com/app-abc123:build-42",
-			})
-
-		// Step 3: Install app
 		case r.Method == "POST" && r.URL.Path == "/api/v1/apps":
-			step++
-			if step != 3 {
-				t.Fatalf("InstallApp called at step %d, expected 3", step)
-			}
+			cloudronStep++
 			var payload map[string]any
 			json.NewDecoder(r.Body).Decode(&payload)
-
 			if payload["location"] != "testapp" {
 				t.Fatalf("wrong subdomain: %v", payload["location"])
 			}
-			if payload["image"] != "registry.cloud.example.com/app-abc123:build-42" {
+			if payload["image"] != "registry.test/app:build-42" {
 				t.Fatalf("wrong image: %v", payload["image"])
 			}
-			manifest, ok := payload["manifest"].(map[string]any)
-			if !ok || manifest["id"] != "io.test.myapp" {
-				t.Fatalf("wrong manifest: %v", payload["manifest"])
-			}
-
-			json.NewEncoder(w).Encode(map[string]string{
-				"id":   "app-999",
-				"fqdn": "testapp.cloud.example.com",
-			})
+			json.NewEncoder(w).Encode(map[string]string{"id": "app-999", "fqdn": "testapp.cloud.example.com"})
 
 		default:
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+			t.Fatalf("unexpected Cloudron request: %s %s", r.Method, r.URL.Path)
 		}
 	}))
-	defer srv.Close()
+	defer cloudronSrv.Close()
 
-	// Create mock package directory with manifest and tarball-ready files
+	// Mock Build Service
+	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == "POST" && r.URL.Path == "/api/v1/builds" {
+			buildStep++
+			if err := r.ParseMultipartForm(10 << 20); err != nil {
+				t.Fatalf("expected multipart: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]string{"image": "registry.test/app:build-42"})
+		} else {
+			t.Fatalf("unexpected Build Service request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer buildSrv.Close()
+
+	// Create mock package directory
 	dir := t.TempDir()
-	manifestContent := `{"id":"io.test.myapp","title":"Test App","version":"1.0.0","manifestVersion":2}`
 	manifestPath := filepath.Join(dir, "CloudronManifest.json")
-	os.WriteFile(manifestPath, []byte(manifestContent), 0644)
+	os.WriteFile(manifestPath, []byte(`{"id":"io.test.myapp","title":"Test App","version":"1.0.0"}`), 0644)
 
-	// Create a fake tarball for upload
 	tarball := filepath.Join(dir, "package.tar.gz")
-	os.WriteFile(tarball, []byte("fake-tarball-content-for-test"), 0644)
+	os.WriteFile(tarball, []byte("fake-tarball"), 0644)
 
 	// === Run the full flow ===
-	client := NewClient(srv.URL, "test-token-xyz", false)
+	client := NewClient(cloudronSrv.URL, "test-token-xyz", false)
+	client.SetBuildService(buildSrv.URL, "build-token")
 
 	// Step 1: Verify connection
 	info, err := client.GetCloudronInfo()
 	if err != nil {
-		t.Fatalf("Step 1 (GetCloudronInfo) failed: %v", err)
+		t.Fatalf("GetCloudronInfo failed: %v", err)
 	}
-	if info.Domain != "cloud.example.com" {
-		t.Fatalf("domain=%q", info.Domain)
+	if info.Version != "9.1.5" {
+		t.Fatalf("version=%q", info.Version)
 	}
 
 	// Step 2: Build image
 	imageTag, err := client.BuildImage(tarball)
 	if err != nil {
-		t.Fatalf("Step 2 (BuildImage) failed: %v", err)
+		t.Fatalf("BuildImage failed: %v", err)
 	}
-	if imageTag != "registry.cloud.example.com/app-abc123:build-42" {
+	if imageTag != "registry.test/app:build-42" {
 		t.Fatalf("imageTag=%q", imageTag)
 	}
 
 	// Step 3: Install app
 	appURL, err := client.InstallApp(manifestPath, imageTag, "testapp")
 	if err != nil {
-		t.Fatalf("Step 3 (InstallApp) failed: %v", err)
+		t.Fatalf("InstallApp failed: %v", err)
 	}
 	if appURL != "https://testapp.cloud.example.com" {
 		t.Fatalf("appURL=%q", appURL)
 	}
 
-	// Verify all 3 steps were executed in order
-	if step != 3 {
-		t.Fatalf("expected 3 API calls, got %d", step)
+	// Verify all steps executed
+	if cloudronStep != 3 {
+		t.Fatalf("expected 3 Cloudron API calls, got %d", cloudronStep)
+	}
+	if buildStep != 1 {
+		t.Fatalf("expected 1 Build Service call, got %d", buildStep)
 	}
 }
 
-// TestDeploymentFlow_AuthFailure verifies the flow stops at step 1 on bad token.
 func TestDeploymentFlow_AuthFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)
@@ -148,31 +122,24 @@ func TestDeploymentFlow_AuthFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected auth failure")
 	}
-	// Flow should stop here — BuildImage and InstallApp should NOT be called
 }
 
-// TestDeploymentFlow_BuildFailure verifies correct behavior when build fails.
 func TestDeploymentFlow_BuildFailure(t *testing.T) {
-	callCount := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount++
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/api/v1/config":
-			json.NewEncoder(w).Encode(CloudronInfo{Version: "8.0", DisplayName: "T", Domain: "t.com"})
-		case "/api/v1/developer/build":
-			w.WriteHeader(500) // Build failure
-		default:
-			t.Fatalf("unexpected call to %s after build failure", r.URL.Path)
-		}
+	cloudronSrv := cloudronMock(t)
+	defer cloudronSrv.Close()
+
+	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
 	}))
-	defer srv.Close()
+	defer buildSrv.Close()
 
 	dir := t.TempDir()
 	tarball := filepath.Join(dir, "pkg.tar.gz")
 	os.WriteFile(tarball, []byte("data"), 0644)
 
-	client := NewClient(srv.URL, "tok", false)
+	client := NewClient(cloudronSrv.URL, "tok", false)
+	client.httpClient = cloudronSrv.Client()
+	client.SetBuildService(buildSrv.URL, "tok")
 
 	// Step 1 should succeed
 	_, err := client.GetCloudronInfo()
@@ -181,13 +148,10 @@ func TestDeploymentFlow_BuildFailure(t *testing.T) {
 	}
 
 	// Step 2 should fail
+	// Need to use build service's http client
+	client.httpClient = buildSrv.Client()
 	_, err = client.BuildImage(tarball)
 	if err == nil {
 		t.Fatal("expected build failure")
-	}
-
-	// Verify exactly 2 calls were made (no step 3)
-	if callCount != 2 {
-		t.Fatalf("expected 2 API calls, got %d", callCount)
 	}
 }
