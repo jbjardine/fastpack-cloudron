@@ -309,6 +309,31 @@ func TestCreateTarball_NonZeroTarball(t *testing.T) {
 	}
 }
 
+func TestCreateTarball_CloudronVersionsCase(t *testing.T) {
+	// Bug found by Codex: frontend generates "CloudronVersions.json" (PascalCase)
+	// The allow-list must match exactly.
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "CloudronManifest.json"), []byte(`{}`), 0644)
+	os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM x"), 0644)
+	os.WriteFile(filepath.Join(dir, "CloudronVersions.json"), []byte(`{"1.0.0":{}}`), 0644)
+	// Wrong case should NOT be included
+	os.WriteFile(filepath.Join(dir, "cloudron-versions.json"), []byte(`{"wrong":true}`), 0644)
+
+	tarPath, err := CreateTarball(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tarPath)
+
+	files := untar(t, tarPath)
+	if _, ok := files["CloudronVersions.json"]; !ok {
+		t.Fatal("CloudronVersions.json (PascalCase) should be in tarball")
+	}
+	if _, ok := files["cloudron-versions.json"]; ok {
+		t.Fatal("cloudron-versions.json (kebab-case) should NOT be in tarball")
+	}
+}
+
 func TestAllowedFiles(t *testing.T) {
 	files := AllowedFiles()
 	if len(files) == 0 {
@@ -317,6 +342,19 @@ func TestAllowedFiles(t *testing.T) {
 	// Verify CloudronManifest.json is first (required)
 	if files[0] != "CloudronManifest.json" {
 		t.Fatalf("first file should be CloudronManifest.json, got %q", files[0])
+	}
+	// Verify CloudronVersions.json uses correct case (matches frontend)
+	found := false
+	for _, f := range files {
+		if f == "CloudronVersions.json" {
+			found = true
+		}
+		if f == "cloudron-versions.json" {
+			t.Fatal("allow-list should use CloudronVersions.json, not cloudron-versions.json")
+		}
+	}
+	if !found {
+		t.Fatal("CloudronVersions.json not found in allow-list")
 	}
 }
 

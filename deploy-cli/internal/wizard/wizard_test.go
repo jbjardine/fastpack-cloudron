@@ -364,6 +364,60 @@ func TestRunWithIO_SubdomainMaxLength(t *testing.T) {
 	}
 }
 
+func TestRunWithIO_CloudronTokenEnvWhitespace(t *testing.T) {
+	// Mutation target: CLOUDRON_TOKEN with whitespace should be used as-is
+	// (env vars are not trimmed — the user controls their environment)
+	t.Setenv("CLOUDRON_TOKEN", "  spaced-token  ")
+
+	in := strings.NewReader("example.com\nmyapp\n")
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Env var tokens are used exactly as provided (spaces and all)
+	if cfg.Token != "  spaced-token  " {
+		t.Fatalf("env token should be used as-is, got %q", cfg.Token)
+	}
+}
+
+func TestRunWithIO_CloudronTokenEnvEmpty(t *testing.T) {
+	// Empty CLOUDRON_TOKEN should fall through to prompt
+	t.Setenv("CLOUDRON_TOKEN", "")
+
+	in := strings.NewReader("example.com\nmy-token\nmyapp\n")
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Token != "my-token" {
+		t.Fatalf("empty env should fall through to prompt, got token=%q", cfg.Token)
+	}
+}
+
+func TestRunWithIO_LocalhostWithPort(t *testing.T) {
+	// Verify localhost:PORT is correctly detected as dev instance
+	in := strings.NewReader("localhost:3000\ntoken\nsub\n")
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AllowSelfSigned {
+		t.Fatal("localhost:3000 should trigger AllowSelfSigned")
+	}
+}
+
+func TestRunWithIO_URLWhitespaceOnly(t *testing.T) {
+	in := strings.NewReader("   \n")
+	out := new(bytes.Buffer)
+	_, err := RunWithIO(in, out)
+	if err == nil || !strings.Contains(err.Error(), "URL is required") {
+		t.Fatalf("whitespace-only URL should be rejected, got %v", err)
+	}
+}
+
 func TestValidSubdomainRegex(t *testing.T) {
 	valid := []string{"a", "ab", "a1", "my-app", "app123", "a-b-c"}
 	invalid := []string{"", "-a", "a-", "A", "a_b", "a b", ".a", "a.b"}

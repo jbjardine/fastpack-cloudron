@@ -29,8 +29,8 @@ var allowedFiles = []string{
 	"DESCRIPTION.md",
 	"CHANGELOG.md",
 	"README.md",
-	// Extra config
-	"cloudron-versions.json",
+	// Extra config (matches frontend's zip.file('CloudronVersions.json', ...))
+	"CloudronVersions.json",
 }
 
 // CreateTarball creates a .tar.gz of the allowed package files in dir.
