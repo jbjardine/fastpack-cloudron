@@ -534,6 +534,28 @@ function validate(config) {
     });
   }
 
+  // Warning: multi-service complexity
+  if (config.services && config.services.length >= 2) {
+    warnings.push({
+      message: 'Multi-service apps run all processes in one container. Consider separate Cloudron apps for independent services (easier updates, isolation, debugging).',
+    });
+  }
+
+  // Warning: COPY --from= Alpine/Debian mismatch
+  if (config.copyFrom && config.copyFrom.length > 0) {
+    const baseIsAlpine = imageLower.includes('alpine');
+    for (const cf of config.copyFrom) {
+      const cfLower = (cf.image || '').toLowerCase();
+      const cfIsAlpine = cfLower.includes('alpine');
+      if (baseIsAlpine !== cfIsAlpine && (baseIsAlpine || cfIsAlpine)) {
+        warnings.push({
+          message: `COPY --from=${cf.image}: mixing Alpine (musl) and Debian (glibc) images. Compiled binaries may not run. Use matching distros.`,
+        });
+        break;
+      }
+    }
+  }
+
   if (/fedora|centos|rocky|amazon/.test(imageLower)) {
     warnings.push({
       message: 'This image uses dnf. gosu will be installed via util-linux/setpriv.',
