@@ -109,6 +109,9 @@ func TestRunWithIO_SelfSignedDetection(t *testing.T) {
 		"localhost",
 		"192.168.1.1",
 		"10.0.0.5",
+		"172.17.0.1",
+		"172.16.0.1",
+		"172.31.255.1",
 	}
 	for _, u := range devURLs {
 		t.Run(u, func(t *testing.T) {
@@ -134,6 +137,9 @@ func TestRunWithIO_SelfSignedFalsePositive(t *testing.T) {
 		"my.example10.com",
 		"10cloud.example.com",
 		"something.10x.io",
+		"172.32.0.1",
+		"172.15.0.1",
+		"172cloud.example.com",
 	}
 	for _, u := range safeURLs {
 		t.Run(u, func(t *testing.T) {

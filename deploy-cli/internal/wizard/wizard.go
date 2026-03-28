@@ -254,7 +254,29 @@ func isDevInstance(rawURL string) bool {
 		host == "nip.io" ||
 		host == "localhost" ||
 		strings.HasPrefix(host, "192.168.") ||
-		strings.HasPrefix(host, "10.")
+		strings.HasPrefix(host, "10.") ||
+		isRFC1918_172(host)
+}
+
+// isRFC1918_172 checks if host is in the 172.16.0.0/12 private range.
+func isRFC1918_172(host string) bool {
+	if !strings.HasPrefix(host, "172.") {
+		return false
+	}
+	// Extract second octet
+	rest := host[4:]
+	dot := strings.IndexByte(rest, '.')
+	if dot < 1 || dot > 2 {
+		return false
+	}
+	octet := 0
+	for _, c := range rest[:dot] {
+		if c < '0' || c > '9' {
+			return false
+		}
+		octet = octet*10 + int(c-'0')
+	}
+	return octet >= 16 && octet <= 31
 }
 
 func readLine(reader *bufio.Reader) (string, error) {

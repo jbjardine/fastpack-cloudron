@@ -350,6 +350,11 @@ func TestInstallApp_Success(t *testing.T) {
 		if _, _, err := r.FormFile("sourceArchive"); err != nil {
 			t.Fatalf("no sourceArchive field: %v", err)
 		}
+		// Verify accessRestriction
+		ar := r.FormValue("accessRestriction")
+		if ar == "" {
+			t.Fatal("missing accessRestriction field")
+		}
 		// Verify auth
 		auth := r.Header.Get("Authorization")
 		if auth != "Bearer tok" {
