@@ -452,6 +452,11 @@
           <input type="text" id="app-icon" placeholder="file://icon.png (256x256)">
         </div>
         <div class="form-group">
+          <label for="app-icon-file">Upload Icon (256x256 PNG)</label>
+          <input type="file" id="app-icon-file" accept="image/png">
+          <span class="field-error" data-error-for="app-icon-file" id="err-icon-file"></span>
+        </div>
+        <div class="form-group">
           <label for="health-check-path">Health Check Path</label>
           <input type="text" id="health-check-path" value="/" aria-describedby="err-health-check-path">
           <span class="field-error" data-error-for="health-check-path" id="err-health-check-path"></span>
@@ -500,6 +505,10 @@
 
       <details>
         <summary>Publishing</summary>
+        <div class="form-group">
+          <label for="docker-hub-username">Docker Hub Username (for CloudronVersions.json)</label>
+          <input type="text" id="docker-hub-username" placeholder="e.g., jbjardine">
+        </div>
         <div class="form-group">
           <label for="packager-name">Packager Name</label>
           <input type="text" id="packager-name" placeholder="Your Name or Org">
@@ -574,6 +583,7 @@
           <div class="checkbox-grid">
             <label><input type="checkbox" id="full-domain"> Full domain deployment (no subdomain)</label>
             <label><input type="checkbox" id="single-user"> Single-user app mode</label>
+            <label><input type="checkbox" id="dockerfile-cloudron"> Name Dockerfile as Dockerfile.cloudron</label>
           </div>
         </div>
         <div class="form-group">

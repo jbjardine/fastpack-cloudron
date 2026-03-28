@@ -52,6 +52,7 @@ function buildConfig() {
   const memoryLimitEl = document.getElementById('app-memory-limit');
 
   // Publishing fields
+  const dockerHubUsernameEl = document.getElementById('docker-hub-username');
   const packagerNameEl = document.getElementById('packager-name');
   const packagerUrlEl = document.getElementById('packager-url');
   const iconUrlEl = document.getElementById('icon-url');
@@ -66,6 +67,7 @@ function buildConfig() {
   const multiDomainEl = document.getElementById('multi-domain');
   const fullDomainEl = document.getElementById('full-domain');
   const singleUserEl = document.getElementById('single-user');
+  const dockerfileCloudronEl = document.getElementById('dockerfile-cloudron');
   const secondarySubdomainsEl = document.getElementById('secondary-subdomains');
   const runtimeDirsEl = document.getElementById('runtime-dirs');
   const persistentDirsEl = document.getElementById('persistent-dirs');
@@ -255,6 +257,7 @@ function buildConfig() {
     icon: iconEl.value.trim(),
     memoryLimit,
     // Publishing
+    dockerHubUsername: dockerHubUsernameEl.value.trim(),
     packagerName: packagerNameEl.value.trim(),
     packagerUrl: packagerUrlEl.value.trim(),
     iconUrl: iconUrlEl.value.trim(),
@@ -269,6 +272,7 @@ function buildConfig() {
     multiDomain: multiDomainEl.checked,
     fullDomain: fullDomainEl.checked,
     singleUser: singleUserEl.checked,
+    dockerfileCloudron: dockerfileCloudronEl.checked,
     secondarySubdomains: parseDirs(secondarySubdomainsEl),
     runtimeDirs: parseDirs(runtimeDirsEl),
     persistentDirs: parseDirs(persistentDirsEl),
@@ -684,7 +688,8 @@ async function downloadZip() {
     // Build ZIP using JSZip (loaded as global from CDN)
     const zip = new JSZip();
     zip.file('CloudronManifest.json', generateManifest(config));
-    zip.file('Dockerfile', generateDockerfile(config));
+    const dockerfileName = config.dockerfileCloudron ? 'Dockerfile.cloudron' : 'Dockerfile';
+    zip.file(dockerfileName, generateDockerfile(config));
     zip.file('start.sh', generateStartSh(config));
     zip.file('.dockerignore', generateDockerignore());
     zip.file('README.md', generateReadme(config));
@@ -699,6 +704,16 @@ async function downloadZip() {
     // Add nginx.conf if services are configured
     if (config.services && config.services.length > 0) {
       zip.file('nginx.conf', generateNginxConf(config));
+    }
+
+    // Add icon file if uploaded
+    const iconFileInput = document.getElementById('app-icon-file');
+    const iconError = document.getElementById('err-icon-file');
+    if (iconError) iconError.textContent = '';
+    if (iconFileInput && iconFileInput.files.length > 0) {
+      const iconFile = iconFileInput.files[0];
+      const iconData = await iconFile.arrayBuffer();
+      zip.file('icon.png', iconData);
     }
 
     // Add publishing stubs
@@ -1080,6 +1095,26 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
+  // Icon file validation
+  document.getElementById('app-icon-file').addEventListener('change', function () {
+    const errEl = document.getElementById('err-icon-file');
+    errEl.textContent = '';
+    const file = this.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/png')) {
+      errEl.textContent = 'Icon must be a PNG file';
+      return;
+    }
+    const img = new Image();
+    img.onload = function () {
+      if (img.width !== 256 || img.height !== 256) {
+        errEl.textContent = `Icon must be 256x256 (got ${img.width}x${img.height})`;
+      }
+      URL.revokeObjectURL(img.src);
+    };
+    img.src = URL.createObjectURL(file);
+  });
+
   // --- localStorage persistence ---
   const STORAGE_KEY = 'fastpack-cloudron-config';
 
@@ -1092,7 +1127,7 @@ document.addEventListener('DOMContentLoaded', function () {
     'app-stack', 'database', 'sso',
     'oidc-redirect-uri', 'oidc-logout-uri', 'oidc-token-algo',
     'proxyauth-path',
-    'packager-name', 'packager-url', 'icon-url', 'media-links',
+    'docker-hub-username', 'packager-name', 'packager-url', 'icon-url', 'media-links',
     'documentation-url', 'forum-url',
     'min-box-version', 'max-box-version', 'target-box-version',
     'runtime-dirs', 'persistent-dirs', 'backup-command', 'restore-command',
@@ -1106,7 +1141,7 @@ document.addEventListener('DOMContentLoaded', function () {
     'proxyauth-basic-auth', 'proxyauth-bearer-auth',
     'mysql-multiple-dbs', 'mongodb-oplog', 'redis-no-password',
     'sendmail-optional', 'sendmail-display-name', 'sendmail-valid-cert',
-    'localstorage-ftp', 'localstorage-sqlite',
+    'localstorage-ftp', 'localstorage-sqlite', 'dockerfile-cloudron',
   ];
 
   function saveToLocalStorage() {

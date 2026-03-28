@@ -869,9 +869,11 @@ export function generateNginxConf(config) {
  * Generates CloudronVersions.json for community app publishing.
  */
 export function generateCloudronVersions(config) {
+  const username = config.dockerHubUsername || "USERNAME";
+  const appName = config.id || "your-app";
   const versions = {};
   versions[config.version] = {
-    image: `docker.io/USERNAME/${config.id || "your-app"}:${config.version}`,
+    image: `docker.io/${username}/${appName}:${config.version}`,
   };
   return JSON.stringify(versions, null, 2);
 }
