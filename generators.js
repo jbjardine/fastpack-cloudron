@@ -5,7 +5,7 @@
 // Validation in app.js:validate() provides user-friendly error messages;
 // these guards protect generators even when called from other contexts.
 
-const SAFE_DOCKER_REF = /^[a-zA-Z0-9][a-zA-Z0-9._/:-]*(:[a-zA-Z0-9._-]+)?(@sha256:[a-f0-9]{64})?$/;
+const SAFE_DOCKER_REF = /^[a-zA-Z0-9][a-zA-Z0-9._/-]*(:[a-zA-Z0-9._-]+)?(@sha256:[a-f0-9]{64})?$/;
 const SAFE_PATH = /^[a-zA-Z0-9._/-]+$/;
 const SAFE_IDENTIFIER = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 const SAFE_VERSION = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
