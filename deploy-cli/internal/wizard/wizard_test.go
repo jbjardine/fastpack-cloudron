@@ -501,6 +501,21 @@ func TestRunWithIO_BuildServiceEnvVars(t *testing.T) {
 	if cfg.BuildToken != "env-build-tok" {
 		t.Fatalf("buildToken=%q", cfg.BuildToken)
 	}
+	if !strings.Contains(out.String(), "environment variables") {
+		t.Fatal("expected env vars message in output")
+	}
+}
+
+func TestRunWithIO_BuildServiceEnvURL_NoToken(t *testing.T) {
+	t.Setenv("CLOUDRON_BUILD_SERVICE_URL", "https://devtools.example.com")
+	// CLOUDRON_BUILD_TOKEN is NOT set
+
+	in := strings.NewReader("example.com\ntoken\nmyapp\n")
+	out := new(bytes.Buffer)
+	_, err := RunWithIO(in, out)
+	if err == nil || !strings.Contains(err.Error(), "CLOUDRON_BUILD_TOKEN is missing") {
+		t.Fatalf("expected missing token error, got %v", err)
+	}
 	output := out.String()
 	// With both env vars set, only 3 steps (URL, Token, Subdomain)
 	if !strings.Contains(output, "Step 1/3") {

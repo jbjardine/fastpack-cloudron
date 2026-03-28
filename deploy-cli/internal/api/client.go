@@ -128,6 +128,9 @@ func (c *Client) VerifyBuildService() error {
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
 		return fmt.Errorf("Build Service auth failed (HTTP %d).\n   Your Build Service token may be invalid or expired.\n   Get a new token from: %s", resp.StatusCode, c.buildServiceURL)
 	}
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("Build Service returned HTTP %d.\n   Check that %s is the correct URL", resp.StatusCode, c.buildServiceURL)
+	}
 	return nil
 }
 

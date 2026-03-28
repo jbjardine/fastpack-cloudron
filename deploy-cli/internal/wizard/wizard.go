@@ -121,9 +121,12 @@ func RunWithIO(r io.Reader, w io.Writer) (*Config, error) {
 
 	// --- Build Service ---
 	if envBuildURL != "" {
+		if envBuildToken == "" {
+			return nil, fmt.Errorf("CLOUDRON_BUILD_SERVICE_URL is set but CLOUDRON_BUILD_TOKEN is missing.\n   Set CLOUDRON_BUILD_TOKEN to your Build Service token")
+		}
 		config.BuildServiceURL = envBuildURL
 		config.BuildToken = envBuildToken
-		fmt.Fprintln(w, "\n   Using Build Service from CLOUDRON_BUILD_SERVICE_URL environment variable.")
+		fmt.Fprintln(w, "\n   Using Build Service from environment variables.")
 	} else {
 		step++
 		fmt.Fprintln(w)
