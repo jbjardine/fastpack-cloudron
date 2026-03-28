@@ -235,10 +235,16 @@ func (c *Client) InstallApp(manifestPath, tarballPath, subdomain string) (string
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	writer.WriteField("manifest", string(manifestData))
-	writer.WriteField("subdomain", subdomain)
-	writer.WriteField("domain", domain)
-	writer.WriteField("accessRestriction", `{"users":[],"groups":[]}`)
+	for _, f := range []struct{ k, v string }{
+		{"manifest", string(manifestData)},
+		{"subdomain", subdomain},
+		{"domain", domain},
+		{"accessRestriction", `{"users":[],"groups":[]}`},
+	} {
+		if err := writer.WriteField(f.k, f.v); err != nil {
+			return "", fmt.Errorf("multipart write %s: %w", f.k, err)
+		}
+	}
 
 	// Add sourceArchive file
 	if err := addFileField(writer, "sourceArchive", tarballPath); err != nil {
@@ -271,14 +277,16 @@ func (c *Client) InstallApp(manifestPath, tarballPath, subdomain string) (string
 		ID   string `json:"id"`
 		FQDN string `json:"fqdn"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Sprintf("https://%s.%s", subdomain, domain), nil
-	}
+	// Decode is best-effort — a 202 with no body is still a success.
+	json.NewDecoder(resp.Body).Decode(&result)
 
 	if result.FQDN != "" {
 		return "https://" + result.FQDN, nil
 	}
-	return fmt.Sprintf("https://%s.%s (app ID: %s)", subdomain, domain, result.ID), nil
+	if result.ID != "" {
+		return fmt.Sprintf("https://%s.%s (app ID: %s)", subdomain, domain, result.ID), nil
+	}
+	return fmt.Sprintf("https://%s.%s", subdomain, domain), nil
 }
 
 // UpdateApp updates an existing app with a new sourceArchive.
@@ -296,8 +304,14 @@ func (c *Client) UpdateApp(appID, manifestPath, tarballPath string) (string, err
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	writer.WriteField("manifest", string(manifestData))
-	writer.WriteField("force", "true")
+	for _, f := range []struct{ k, v string }{
+		{"manifest", string(manifestData)},
+		{"force", "true"},
+	} {
+		if err := writer.WriteField(f.k, f.v); err != nil {
+			return "", fmt.Errorf("multipart write %s: %w", f.k, err)
+		}
+	}
 
 	// Add sourceArchive file
 	if err := addFileField(writer, "sourceArchive", tarballPath); err != nil {
@@ -323,7 +337,7 @@ func (c *Client) UpdateApp(appID, manifestPath, tarballPath string) (string, err
 		return "", fmt.Errorf("update failed (HTTP %d): %s", resp.StatusCode, string(body))
 	}
 
-	return fmt.Sprintf("https://%s (updated)", appID), nil
+	return appID, nil
 }
 
 // addFileField adds a file from disk as a multipart form file field.

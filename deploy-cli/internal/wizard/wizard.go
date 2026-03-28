@@ -1,5 +1,4 @@
 // Package wizard provides interactive terminal prompts for deployment configuration.
-// Uses only stdlib — no external dependencies.
 package wizard
 
 import (
@@ -10,6 +9,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 // ValidSubdomain matches valid DNS subdomain labels (RFC 1123).
@@ -29,6 +30,16 @@ type Config struct {
 // StdinReader is the buffered reader from the last Run() call.
 // Use it for subsequent interactive prompts to avoid losing piped input.
 var StdinReader *bufio.Reader
+
+// readPasswordFn reads a password without echoing. Replaced in tests.
+var readPasswordFn = func() (string, error) {
+	b, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Println() // newline after hidden input
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
 
 // Run executes the interactive wizard using stdin/stdout.
 func Run() (*Config, error) {
@@ -85,9 +96,13 @@ func runWithReader(reader *bufio.Reader, w io.Writer) (*Config, error) {
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Step 3/%d: Enter your Cloudron password\n", totalSteps)
 	fmt.Fprint(w, "   Password: ")
-	password, err := readLine(reader)
+	password, err := readPasswordFn()
 	if err != nil {
-		return nil, err
+		// Fallback to plain text if terminal not available (piped input)
+		password, err = readLine(reader)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if strings.TrimSpace(password) == "" {
 		return nil, fmt.Errorf("password is required")

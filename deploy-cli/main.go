@@ -18,6 +18,17 @@ import (
 const version = "2.0.0"
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "\n%v\n", err)
+		fmt.Println("\nPress Enter to exit...")
+		fmt.Scanln()
+		os.Exit(1)
+	}
+	fmt.Println("\nPress Enter to exit...")
+	wizard.StdinReader.ReadString('\n')
+}
+
+func run() error {
 	fmt.Println("╔══════════════════════════════════════╗")
 	fmt.Println("║   FastPack Deploy — Cloudron Deployer ║")
 	fmt.Printf("║   v%s                              ║\n", version)
@@ -27,12 +38,12 @@ func main() {
 	// Step 1: Detect package files in current directory
 	dir, err := os.Getwd()
 	if err != nil {
-		fatal("Cannot determine current directory: %v", err)
+		return fmt.Errorf("cannot determine current directory: %w", err)
 	}
 
-	manifest := filepath.Join(dir, "CloudronManifest.json")
-	if _, err := os.Stat(manifest); os.IsNotExist(err) {
-		fatal("CloudronManifest.json not found in %s\nMake sure you run this from the extracted ZIP folder.", dir)
+	manifestPath := filepath.Join(dir, "CloudronManifest.json")
+	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+		return fmt.Errorf("CloudronManifest.json not found in %s\nMake sure you run this from the extracted ZIP folder", dir)
 	}
 
 	fmt.Printf("📦 Package found in %s\n\n", dir)
@@ -40,7 +51,7 @@ func main() {
 	// Step 2: Interactive wizard — ask for Cloudron URL + credentials
 	config, err := wizard.Run()
 	if err != nil {
-		fatal("Setup cancelled: %v", err)
+		return fmt.Errorf("setup cancelled: %w", err)
 	}
 
 	// Step 3: Authenticate
@@ -54,13 +65,13 @@ func main() {
 			fmt.Println("2FA required")
 			code, err2 := wizard.Ask2FA()
 			if err2 != nil {
-				fatal("Setup cancelled: %v", err2)
+				return fmt.Errorf("setup cancelled: %w", err2)
 			}
 			fmt.Print("🔑 Verifying 2FA... ")
 			err = client.LoginWith2FA(config.Username, config.Password, code)
 		}
 		if err != nil {
-			fatal("\n❌ Login failed: %v\nCheck your username and password.", err)
+			return fmt.Errorf("❌ Login failed: %w\nCheck your username and password", err)
 		}
 		fmt.Println("OK")
 	}
@@ -69,7 +80,7 @@ func main() {
 	fmt.Print("🔗 Connecting to Cloudron... ")
 	info, err := client.GetCloudronInfo()
 	if err != nil {
-		fatal("\n❌ Cannot connect: %v", err)
+		return fmt.Errorf("❌ Cannot connect: %w", err)
 	}
 	fmt.Printf("OK (%s v%s)\n", info.DisplayName, info.Version)
 
@@ -77,7 +88,7 @@ func main() {
 	fmt.Print("📦 Packaging files... ")
 	tarball, err := archive.CreateTarball(dir)
 	if err != nil {
-		fatal("\n❌ Packaging failed: %v", err)
+		return fmt.Errorf("❌ Packaging failed: %w", err)
 	}
 	defer os.Remove(tarball)
 	fmt.Println("OK")
@@ -87,7 +98,7 @@ func main() {
 	if subdomain == "" {
 		subdomain, err = wizard.AskSubdomain()
 		if err != nil {
-			fatal("Setup cancelled: %v", err)
+			return fmt.Errorf("setup cancelled: %w", err)
 		}
 	}
 
@@ -101,19 +112,19 @@ func main() {
 		answer, _ := wizard.StdinReader.ReadString('\n')
 		answer = strings.TrimSpace(answer)
 		if answer != "y" && answer != "Y" {
-			fatal("Cancelled. Choose a different subdomain or update manually.")
+			return fmt.Errorf("cancelled — choose a different subdomain or update manually")
 		}
 
 		fmt.Printf("🔄 Updating app %s.%s... ", subdomain, info.Domain)
-		if _, err = client.UpdateApp(existing.ID, manifest, tarball); err != nil {
-			fatal("\n❌ Update failed: %v", err)
+		if _, err = client.UpdateApp(existing.ID, manifestPath, tarball); err != nil {
+			return fmt.Errorf("❌ Update failed: %w", err)
 		}
 		fmt.Println("OK")
 	} else {
 		// New install
 		fmt.Printf("🚀 Installing app at %s.%s (this may take a few minutes)... ", subdomain, info.Domain)
-		if _, err = client.InstallApp(manifest, tarball, subdomain); err != nil {
-			fatal("\n❌ Install failed: %v", err)
+		if _, err = client.InstallApp(manifestPath, tarball, subdomain); err != nil {
+			return fmt.Errorf("❌ Install failed: %w", err)
 		}
 		fmt.Println("OK")
 	}
@@ -128,14 +139,5 @@ func main() {
 	fmt.Printf("║          ✅ App %s!            ║\n", action)
 	fmt.Printf("║  https://%s.%s\n", subdomain, info.Domain)
 	fmt.Println("╚══════════════════════════════════════╝")
-
-	fmt.Println("\nPress Enter to exit...")
-	wizard.StdinReader.ReadString('\n')
-}
-
-func fatal(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "\n"+format+"\n", args...)
-	fmt.Println("\nPress Enter to exit...")
-	fmt.Scanln()
-	os.Exit(1)
+	return nil
 }

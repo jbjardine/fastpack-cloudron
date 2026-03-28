@@ -2,6 +2,7 @@ package wizard
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -499,5 +500,9 @@ func TestRunWithIO_SubdomainMaxLength(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	os.Unsetenv("CLOUDRON_TOKEN")
+	// Override password reader to use stdin (not terminal) in tests
+	readPasswordFn = func() (string, error) {
+		return "", fmt.Errorf("not a terminal")
+	}
 	os.Exit(m.Run())
 }
