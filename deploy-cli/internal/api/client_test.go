@@ -14,7 +14,6 @@ import (
 func cloudronMock(t *testing.T, opts ...func(w http.ResponseWriter, r *http.Request) bool) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Let custom handlers override
 		for _, h := range opts {
 			if h(w, r) {
 				return
@@ -33,23 +32,7 @@ func cloudronMock(t *testing.T, opts ...func(w http.ResponseWriter, r *http.Requ
 	}))
 }
 
-// buildServiceMock returns a mock Build Service server.
-// Handles both the builds list (for auto-detect) and the build POST.
-func buildServiceMock(t *testing.T, imageTag string) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.Method == "GET" && r.URL.Path == "/api/v1/builds":
-			// Return empty builds list (no previous builds for auto-detect)
-			json.NewEncoder(w).Encode(map[string]any{"builds": []any{}})
-		case r.Method == "POST" && r.URL.Path == "/api/v1/builds":
-			json.NewEncoder(w).Encode(map[string]string{"image": imageTag})
-		default:
-			w.WriteHeader(404)
-		}
-	}))
-}
+// === NewClient tests ===
 
 func TestNewClient_Default(t *testing.T) {
 	c := NewClient("https://example.com", "tok", false)
@@ -60,6 +43,158 @@ func TestNewClient_Default(t *testing.T) {
 		t.Fatalf("token=%q", c.token)
 	}
 }
+
+func TestNewClient_EmptyToken(t *testing.T) {
+	c := NewClient("https://example.com", "", false)
+	if c.token != "" {
+		t.Fatalf("expected empty token, got %q", c.token)
+	}
+}
+
+// === Login tests ===
+
+func TestLogin_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/api/v1/auth/login" {
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		var payload map[string]string
+		json.NewDecoder(r.Body).Decode(&payload)
+		if payload["username"] != "admin" || payload["password"] != "secret" {
+			w.WriteHeader(401)
+			json.NewEncoder(w).Encode(map[string]string{"message": "Invalid credentials"})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"accessToken": "tok-123"})
+	}))
+	defer srv.Close()
+
+	c := &Client{baseURL: srv.URL, httpClient: srv.Client()}
+	err := c.Login("admin", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.token != "tok-123" {
+		t.Fatalf("token=%q, want tok-123", c.token)
+	}
+}
+
+func TestLogin_InvalidCredentials(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(401)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Invalid credentials"})
+	}))
+	defer srv.Close()
+
+	c := &Client{baseURL: srv.URL, httpClient: srv.Client()}
+	err := c.Login("admin", "wrong")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "invalid username or password") {
+		t.Fatalf("err=%q", err.Error())
+	}
+}
+
+func TestLogin_2FARequired(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]string
+		json.NewDecoder(r.Body).Decode(&payload)
+		if payload["totpToken"] == "" {
+			w.WriteHeader(401)
+			json.NewEncoder(w).Encode(map[string]string{"message": "A totpToken must be provided"})
+			return
+		}
+		if payload["totpToken"] != "123456" {
+			w.WriteHeader(401)
+			json.NewEncoder(w).Encode(map[string]string{"message": "Invalid totpToken"})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"accessToken": "tok-2fa"})
+	}))
+	defer srv.Close()
+
+	c := &Client{baseURL: srv.URL, httpClient: srv.Client()}
+
+	// First call: should return Err2FARequired
+	err := c.Login("admin", "secret")
+	if err != Err2FARequired {
+		t.Fatalf("expected Err2FARequired, got %v", err)
+	}
+
+	// Second call with valid TOTP
+	err = c.LoginWith2FA("admin", "secret", "123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.token != "tok-2fa" {
+		t.Fatalf("token=%q, want tok-2fa", c.token)
+	}
+}
+
+func TestLogin_2FAInvalidCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(401)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Invalid totpToken"})
+	}))
+	defer srv.Close()
+
+	c := &Client{baseURL: srv.URL, httpClient: srv.Client()}
+	err := c.LoginWith2FA("admin", "secret", "000000")
+	if err == nil {
+		t.Fatal("expected error for invalid 2FA code")
+	}
+}
+
+func TestLogin_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+		w.Write([]byte(`{"message":"internal error"}`))
+	}))
+	defer srv.Close()
+
+	c := &Client{baseURL: srv.URL, httpClient: srv.Client()}
+	err := c.Login("admin", "secret")
+	if err == nil || !strings.Contains(err.Error(), "500") {
+		t.Fatalf("expected 500 error, got %v", err)
+	}
+}
+
+func TestLogin_TokenFieldFallback(t *testing.T) {
+	// Some Cloudron versions use "token" instead of "accessToken"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"token": "fallback-tok"})
+	}))
+	defer srv.Close()
+
+	c := &Client{baseURL: srv.URL, httpClient: srv.Client()}
+	err := c.Login("admin", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.token != "fallback-tok" {
+		t.Fatalf("token=%q, want fallback-tok", c.token)
+	}
+}
+
+func TestLogin_NoTokenReturned(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer srv.Close()
+
+	c := &Client{baseURL: srv.URL, httpClient: srv.Client()}
+	err := c.Login("admin", "secret")
+	if err == nil || !strings.Contains(err.Error(), "no token returned") {
+		t.Fatalf("expected no token error, got %v", err)
+	}
+}
+
+// === GetCloudronInfo tests ===
 
 func TestGetCloudronInfo_Success(t *testing.T) {
 	srv := cloudronMock(t)
@@ -126,295 +261,6 @@ func TestGetCloudronInfo_VerifiesAuthHeader(t *testing.T) {
 	}
 }
 
-// === BuildImage tests ===
-
-func TestBuildImage_Success(t *testing.T) {
-	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		// Handle auto-detect GET (returns empty builds list)
-		if r.Method == "GET" && r.URL.Path == "/api/v1/builds" {
-			json.NewEncoder(w).Encode(map[string]any{"builds": []any{}})
-			return
-		}
-		if r.Method != "POST" || r.URL.Path != "/api/v1/builds" {
-			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
-		}
-		// Verify accessToken query param
-		if r.URL.Query().Get("accessToken") != "btok" {
-			t.Fatalf("expected accessToken=btok, got %q", r.URL.Query().Get("accessToken"))
-		}
-		if err := r.ParseMultipartForm(10 << 20); err != nil {
-			t.Fatalf("parse multipart: %v", err)
-		}
-		// Build Service expects "sourceArchive" field, not "file"
-		if _, _, err := r.FormFile("sourceArchive"); err != nil {
-			t.Fatalf("no sourceArchive field: %v", err)
-		}
-		// Verify metadata fields
-		if r.FormValue("dockerImageRepo") == "" {
-			t.Fatal("missing dockerImageRepo field")
-		}
-		json.NewEncoder(w).Encode(map[string]string{"image": "registry.example.com/app:v1.0.0"})
-	}))
-	defer buildSrv.Close()
-
-	tmp := t.TempDir()
-	tarball := filepath.Join(tmp, "test.tar.gz")
-	os.WriteFile(tarball, []byte("fake tarball content"), 0644)
-
-	c := &Client{baseURL: "https://unused", token: "tok", buildServiceURL: buildSrv.URL, buildToken: "btok", httpClient: buildSrv.Client()}
-	tag, err := c.BuildImage(tarball)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if tag != "registry.example.com/app:v1.0.0" {
-		t.Fatalf("tag=%q", tag)
-	}
-}
-
-func TestBuildImage_NoBuildService(t *testing.T) {
-	c := &Client{baseURL: "https://example.com", token: "tok", httpClient: http.DefaultClient}
-	_, err := c.BuildImage("/some/path.tar.gz")
-	if err == nil || !strings.Contains(err.Error(), "no Build Service configured") {
-		t.Fatalf("expected build service error, got %v", err)
-	}
-}
-
-func TestBuildImage_NoToken(t *testing.T) {
-	c := &Client{baseURL: "x", token: "tok", buildServiceURL: "https://build.example.com", httpClient: http.DefaultClient}
-	_, err := c.BuildImage("/some/path.tar.gz")
-	if err == nil || !strings.Contains(err.Error(), "no Build Service token") {
-		t.Fatalf("expected build token error, got %v", err)
-	}
-}
-
-func TestBuildImage_Auth401(t *testing.T) {
-	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(401)
-	}))
-	defer buildSrv.Close()
-
-	tmp := t.TempDir()
-	tarball := filepath.Join(tmp, "test.tar.gz")
-	os.WriteFile(tarball, []byte("data"), 0644)
-
-	c := &Client{baseURL: "x", token: "tok", buildServiceURL: buildSrv.URL, buildToken: "bad-token", httpClient: buildSrv.Client()}
-	_, err := c.BuildImage(tarball)
-	if err == nil || !strings.Contains(err.Error(), "auth failed") {
-		t.Fatalf("expected auth error, got %v", err)
-	}
-}
-
-func TestVerifyBuildService_Success(t *testing.T) {
-	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Build Service uses ?accessToken= query param
-		if r.URL.Query().Get("accessToken") != "valid-token" {
-			w.WriteHeader(401)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(200)
-		json.NewEncoder(w).Encode(map[string]string{"username": "admin"})
-	}))
-	defer buildSrv.Close()
-
-	c := &Client{buildServiceURL: buildSrv.URL, buildToken: "valid-token", httpClient: buildSrv.Client()}
-	if err := c.VerifyBuildService(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestVerifyBuildService_AuthFailure(t *testing.T) {
-	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(401)
-	}))
-	defer buildSrv.Close()
-
-	c := &Client{buildServiceURL: buildSrv.URL, buildToken: "bad-token", httpClient: buildSrv.Client()}
-	err := c.VerifyBuildService()
-	if err == nil || !strings.Contains(err.Error(), "auth failed") {
-		t.Fatalf("expected auth error, got %v", err)
-	}
-}
-
-func TestDetectImageRepo_FromPreviousBuilds(t *testing.T) {
-	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
-			"builds": []map[string]string{
-				{"dockerImageRepo": "old-repo/app", "status": "failed"},
-				{"dockerImageRepo": "docker.io/myuser/myapp", "status": "success"},
-			},
-		})
-	}))
-	defer buildSrv.Close()
-
-	c := &Client{buildServiceURL: buildSrv.URL, buildToken: "tok", httpClient: buildSrv.Client()}
-	repo := c.detectImageRepo()
-	if repo != "docker.io/myuser/myapp" {
-		t.Fatalf("expected auto-detected repo, got %q", repo)
-	}
-}
-
-func TestDetectImageRepo_FallbackToHostname(t *testing.T) {
-	// Server returns empty builds list
-	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"builds": []any{}})
-	}))
-	defer buildSrv.Close()
-
-	c := &Client{buildServiceURL: buildSrv.URL, buildToken: "tok", httpClient: buildSrv.Client()}
-	repo := c.detectImageRepo()
-	if !strings.Contains(repo, "127.0.0.1") || !strings.Contains(repo, "/fastpack-app") {
-		t.Fatalf("expected hostname fallback, got %q", repo)
-	}
-}
-
-func TestDetectImageRepo_EnvVarOverride(t *testing.T) {
-	t.Setenv("DOCKER_IMAGE_REPO", "custom-registry.io/my-app")
-
-	c := &Client{buildServiceURL: "https://devtools.example.com", buildToken: "tok"}
-	repo := c.detectImageRepo()
-	if repo != "custom-registry.io/my-app" {
-		t.Fatalf("expected env var override, got %q", repo)
-	}
-}
-
-func TestVerifyBuildService_UsesAccessTokenQueryParam(t *testing.T) {
-	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify the token is sent as query param, not Bearer header
-		if r.Header.Get("Authorization") != "" {
-			t.Fatal("Build Service should not use Authorization header")
-		}
-		if r.URL.Query().Get("accessToken") == "" {
-			t.Fatal("Build Service should receive accessToken query param")
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"username": "admin"})
-	}))
-	defer buildSrv.Close()
-
-	c := &Client{buildServiceURL: buildSrv.URL, buildToken: "test-token", httpClient: buildSrv.Client()}
-	if err := c.VerifyBuildService(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestVerifyBuildService_NoURL(t *testing.T) {
-	c := &Client{buildToken: "tok"}
-	err := c.VerifyBuildService()
-	if err == nil || !strings.Contains(err.Error(), "no Build Service configured") {
-		t.Fatalf("expected no-URL error, got %v", err)
-	}
-}
-
-func TestVerifyBuildService_NoToken(t *testing.T) {
-	c := &Client{buildServiceURL: "https://build.example.com"}
-	err := c.VerifyBuildService()
-	if err == nil || !strings.Contains(err.Error(), "no Build Service token") {
-		t.Fatalf("expected no-token error, got %v", err)
-	}
-}
-
-func TestBuildImage_FileNotFound(t *testing.T) {
-	c := &Client{baseURL: "x", token: "tok", buildServiceURL: "https://build.example.com", httpClient: http.DefaultClient}
-	_, err := c.BuildImage("/nonexistent/path.tar.gz")
-	if err == nil {
-		t.Fatal("expected error for missing file")
-	}
-}
-
-func TestBuildImage_Conflict409(t *testing.T) {
-	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(409)
-	}))
-	defer buildSrv.Close()
-
-	tmp := t.TempDir()
-	tarball := filepath.Join(tmp, "test.tar.gz")
-	os.WriteFile(tarball, []byte("data"), 0644)
-
-	c := &Client{baseURL: "x", token: "tok", buildServiceURL: buildSrv.URL, buildToken: "btok", httpClient: buildSrv.Client()}
-	_, err := c.BuildImage(tarball)
-	if err == nil {
-		t.Fatal("expected 409 error")
-	}
-	if got := err.Error(); got != "build conflict: another build may be in progress (HTTP 409)" {
-		t.Fatalf("err=%q", got)
-	}
-}
-
-func TestBuildImage_TagFallback(t *testing.T) {
-	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"tag": "fallback:latest"})
-	}))
-	defer buildSrv.Close()
-
-	tmp := t.TempDir()
-	tarball := filepath.Join(tmp, "test.tar.gz")
-	os.WriteFile(tarball, []byte("data"), 0644)
-
-	c := &Client{baseURL: "x", token: "tok", buildServiceURL: buildSrv.URL, buildToken: "btok", httpClient: buildSrv.Client()}
-	tag, err := c.BuildImage(tarball)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if tag != "fallback:latest" {
-		t.Fatalf("tag=%q", tag)
-	}
-}
-
-func TestBuildImage_VerifiesContentType(t *testing.T) {
-	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		// Handle auto-detect GET
-		if r.Method == "GET" && r.URL.Path == "/api/v1/builds" {
-			json.NewEncoder(w).Encode(map[string]any{"builds": []any{}})
-			return
-		}
-		ct := r.Header.Get("Content-Type")
-		if !strings.Contains(ct, "multipart/form-data") {
-			t.Fatalf("expected multipart/form-data, got %q", ct)
-		}
-		json.NewEncoder(w).Encode(map[string]string{"image": "img:v1"})
-	}))
-	defer buildSrv.Close()
-
-	tmp := t.TempDir()
-	tarball := filepath.Join(tmp, "test.tar.gz")
-	os.WriteFile(tarball, []byte("data"), 0644)
-
-	c := &Client{baseURL: "x", token: "tok", buildServiceURL: buildSrv.URL, buildToken: "btok", httpClient: buildSrv.Client()}
-	_, err := c.BuildImage(tarball)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestBuildImage_ServerError500(t *testing.T) {
-	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(500)
-	}))
-	defer buildSrv.Close()
-
-	tmp := t.TempDir()
-	tarball := filepath.Join(tmp, "test.tar.gz")
-	os.WriteFile(tarball, []byte("data"), 0644)
-
-	c := &Client{baseURL: "x", token: "tok", buildServiceURL: buildSrv.URL, buildToken: "btok", httpClient: buildSrv.Client()}
-	_, err := c.BuildImage(tarball)
-	if err == nil {
-		t.Fatal("expected error for 500")
-	}
-	if !strings.Contains(err.Error(), "500") {
-		t.Fatalf("expected 500 in error, got %q", err.Error())
-	}
-}
-
-// === InstallApp tests ===
-
 // === FindAppBySubdomain tests ===
 
 func TestFindAppBySubdomain_Found(t *testing.T) {
@@ -469,86 +315,60 @@ func TestFindAppBySubdomain_NotFound(t *testing.T) {
 	}
 }
 
-// === UpdateApp tests ===
-
-func TestUpdateApp_Success(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" || r.URL.Path != "/api/v1/apps/app-123/update" {
-			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
-		}
-		var payload map[string]any
-		json.NewDecoder(r.Body).Decode(&payload)
-		m, _ := payload["manifest"].(map[string]any)
-		if m["dockerImage"] != "registry/app:v2" {
-			t.Fatalf("dockerImage=%v", m["dockerImage"])
-		}
-		if payload["force"] != true {
-			t.Fatal("expected force=true")
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(202)
-		json.NewEncoder(w).Encode(map[string]string{"taskId": "42"})
-	}))
-	defer srv.Close()
-
-	tmp := t.TempDir()
-	manifest := filepath.Join(tmp, "CloudronManifest.json")
-	os.WriteFile(manifest, []byte(`{"id":"io.test.app","title":"Test","version":"2.0.0"}`), 0644)
-
-	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
-	_, err := c.UpdateApp("app-123", manifest, "registry/app:v2")
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestUpdateApp_Failure(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(500)
-		w.Write([]byte(`{"message":"internal error"}`))
-	}))
-	defer srv.Close()
-
-	tmp := t.TempDir()
-	manifest := filepath.Join(tmp, "CloudronManifest.json")
-	os.WriteFile(manifest, []byte(`{"id":"io.test"}`), 0644)
-
-	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
-	_, err := c.UpdateApp("app-123", manifest, "img:v1")
-	if err == nil || !strings.Contains(err.Error(), "500") {
-		t.Fatalf("expected 500 error, got %v", err)
-	}
-}
-
-// === InstallApp tests ===
+// === InstallApp tests (multipart sourceArchive) ===
 
 func TestInstallApp_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" || r.URL.Path != "/api/v1/apps" {
 			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
 		}
-		var payload map[string]any
-		json.NewDecoder(r.Body).Decode(&payload)
-		// Cloudron v9: subdomain + domain instead of location
-		if payload["subdomain"] != "myapp" {
-			t.Fatalf("subdomain=%v", payload["subdomain"])
+		// Verify multipart
+		ct := r.Header.Get("Content-Type")
+		if !strings.Contains(ct, "multipart/form-data") {
+			t.Fatalf("expected multipart/form-data, got %q", ct)
 		}
-		// Check dockerImage is set inside manifest
-		m, _ := payload["manifest"].(map[string]any)
-		if m["dockerImage"] != "registry/app:v1" {
-			t.Fatalf("dockerImage=%v", m["dockerImage"])
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		// Verify fields
+		if r.FormValue("subdomain") != "myapp" {
+			t.Fatalf("subdomain=%q", r.FormValue("subdomain"))
+		}
+		if r.FormValue("domain") == "" {
+			t.Fatal("missing domain field")
+		}
+		manifest := r.FormValue("manifest")
+		if manifest == "" {
+			t.Fatal("missing manifest field")
+		}
+		// Verify manifest is valid JSON
+		var m map[string]any
+		if err := json.Unmarshal([]byte(manifest), &m); err != nil {
+			t.Fatalf("manifest is not valid JSON: %v", err)
+		}
+		// Verify sourceArchive file
+		if _, _, err := r.FormFile("sourceArchive"); err != nil {
+			t.Fatalf("no sourceArchive field: %v", err)
+		}
+		// Verify auth
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer tok" {
+			t.Fatalf("auth=%q", auth)
 		}
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(202)
 		json.NewEncoder(w).Encode(map[string]string{"id": "app-123", "fqdn": "myapp.example.com"})
 	}))
 	defer srv.Close()
 
 	tmp := t.TempDir()
-	manifest := filepath.Join(tmp, "CloudronManifest.json")
-	os.WriteFile(manifest, []byte(`{"id":"io.test.app","title":"Test","version":"1.0.0"}`), 0644)
+	manifestFile := filepath.Join(tmp, "CloudronManifest.json")
+	os.WriteFile(manifestFile, []byte(`{"id":"io.test.app","title":"Test","version":"1.0.0"}`), 0644)
+	tarball := filepath.Join(tmp, "test.tar.gz")
+	os.WriteFile(tarball, []byte("fake tarball content"), 0644)
 
 	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
-	u, err := c.InstallApp(manifest, "registry/app:v1", "myapp")
+	u, err := c.InstallApp(manifestFile, tarball, "myapp")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,11 +384,13 @@ func TestInstallApp_SubdomainConflict(t *testing.T) {
 	defer srv.Close()
 
 	tmp := t.TempDir()
-	manifest := filepath.Join(tmp, "CloudronManifest.json")
-	os.WriteFile(manifest, []byte(`{"id":"io.test.app"}`), 0644)
+	manifestFile := filepath.Join(tmp, "CloudronManifest.json")
+	os.WriteFile(manifestFile, []byte(`{"id":"io.test.app"}`), 0644)
+	tarball := filepath.Join(tmp, "test.tar.gz")
+	os.WriteFile(tarball, []byte("data"), 0644)
 
 	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
-	_, err := c.InstallApp(manifest, "img:v1", "taken")
+	_, err := c.InstallApp(manifestFile, tarball, "taken")
 	if err == nil {
 		t.Fatal("expected 409 error")
 	}
@@ -576,11 +398,13 @@ func TestInstallApp_SubdomainConflict(t *testing.T) {
 
 func TestInstallApp_InvalidManifest(t *testing.T) {
 	tmp := t.TempDir()
-	manifest := filepath.Join(tmp, "CloudronManifest.json")
-	os.WriteFile(manifest, []byte(`{not json`), 0644)
+	manifestFile := filepath.Join(tmp, "CloudronManifest.json")
+	os.WriteFile(manifestFile, []byte(`{not json`), 0644)
+	tarball := filepath.Join(tmp, "test.tar.gz")
+	os.WriteFile(tarball, []byte("data"), 0644)
 
 	c := &Client{baseURL: "https://example.com", token: "tok", httpClient: http.DefaultClient}
-	_, err := c.InstallApp(manifest, "img:v1", "sub")
+	_, err := c.InstallApp(manifestFile, tarball, "sub")
 	if err == nil {
 		t.Fatal("expected JSON error")
 	}
@@ -588,63 +412,177 @@ func TestInstallApp_InvalidManifest(t *testing.T) {
 
 func TestInstallApp_MissingManifest(t *testing.T) {
 	c := &Client{baseURL: "https://example.com", token: "tok", httpClient: http.DefaultClient}
-	_, err := c.InstallApp("/nonexistent", "img:v1", "sub")
+	_, err := c.InstallApp("/nonexistent", "/nonexistent.tar.gz", "sub")
 	if err == nil {
 		t.Fatal("expected file not found error")
 	}
 }
 
-func TestInstallApp_VerifiesPayloadStructure(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload map[string]any
-		json.NewDecoder(r.Body).Decode(&payload)
-		if _, ok := payload["manifest"]; !ok {
-			t.Fatal("missing manifest")
-		}
-		if payload["subdomain"] != "myapp" {
-			t.Fatalf("subdomain=%v", payload["subdomain"])
-		}
-		// Cloudron v9: dockerImage goes inside the manifest
-		m, _ := payload["manifest"].(map[string]any)
-		if m["dockerImage"] != "registry/app:v1" {
-			t.Fatalf("dockerImage=%v", m["dockerImage"])
-		}
-		if payload["domain"] == nil || payload["domain"] == "" {
-			t.Fatal("missing domain field")
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"fqdn": "myapp.example.com"})
-	}))
-	defer srv.Close()
-
+func TestInstallApp_MissingTarball(t *testing.T) {
 	tmp := t.TempDir()
-	manifest := filepath.Join(tmp, "CloudronManifest.json")
-	os.WriteFile(manifest, []byte(`{"id":"io.test"}`), 0644)
+	manifestFile := filepath.Join(tmp, "CloudronManifest.json")
+	os.WriteFile(manifestFile, []byte(`{"id":"io.test"}`), 0644)
 
-	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
-	_, err := c.InstallApp(manifest, "registry/app:v1", "myapp")
-	if err != nil {
-		t.Fatal(err)
+	c := &Client{baseURL: "https://example.com", token: "tok", httpClient: http.DefaultClient}
+	_, err := c.InstallApp(manifestFile, "/nonexistent.tar.gz", "sub")
+	if err == nil {
+		t.Fatal("expected file not found error")
 	}
 }
 
 func TestInstallApp_FallbackURL(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(202)
 		json.NewEncoder(w).Encode(map[string]string{"id": "app-456"})
 	}))
 	defer srv.Close()
 
 	tmp := t.TempDir()
-	manifest := filepath.Join(tmp, "CloudronManifest.json")
-	os.WriteFile(manifest, []byte(`{"id":"io.test.app"}`), 0644)
+	manifestFile := filepath.Join(tmp, "CloudronManifest.json")
+	os.WriteFile(manifestFile, []byte(`{"id":"io.test.app"}`), 0644)
+	tarball := filepath.Join(tmp, "test.tar.gz")
+	os.WriteFile(tarball, []byte("data"), 0644)
 
 	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
-	u, err := c.InstallApp(manifest, "img:v1", "myapp")
+	u, err := c.InstallApp(manifestFile, tarball, "myapp")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u != "https://myapp (app ID: app-456)" {
+	// Should contain the subdomain and app ID
+	if !strings.Contains(u, "myapp") || !strings.Contains(u, "app-456") {
 		t.Fatalf("url=%q", u)
+	}
+}
+
+func TestInstallApp_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+		w.Write([]byte(`{"message":"internal error"}`))
+	}))
+	defer srv.Close()
+
+	tmp := t.TempDir()
+	manifestFile := filepath.Join(tmp, "CloudronManifest.json")
+	os.WriteFile(manifestFile, []byte(`{"id":"io.test"}`), 0644)
+	tarball := filepath.Join(tmp, "test.tar.gz")
+	os.WriteFile(tarball, []byte("data"), 0644)
+
+	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
+	_, err := c.InstallApp(manifestFile, tarball, "myapp")
+	if err == nil || !strings.Contains(err.Error(), "500") {
+		t.Fatalf("expected 500 error, got %v", err)
+	}
+}
+
+// === UpdateApp tests (multipart sourceArchive) ===
+
+func TestUpdateApp_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/api/v1/apps/app-123/update" {
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		// Verify multipart
+		ct := r.Header.Get("Content-Type")
+		if !strings.Contains(ct, "multipart/form-data") {
+			t.Fatalf("expected multipart/form-data, got %q", ct)
+		}
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		manifest := r.FormValue("manifest")
+		if manifest == "" {
+			t.Fatal("missing manifest field")
+		}
+		if r.FormValue("force") != "true" {
+			t.Fatal("expected force=true")
+		}
+		if _, _, err := r.FormFile("sourceArchive"); err != nil {
+			t.Fatalf("no sourceArchive field: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(202)
+		json.NewEncoder(w).Encode(map[string]string{"taskId": "42"})
+	}))
+	defer srv.Close()
+
+	tmp := t.TempDir()
+	manifestFile := filepath.Join(tmp, "CloudronManifest.json")
+	os.WriteFile(manifestFile, []byte(`{"id":"io.test.app","title":"Test","version":"2.0.0"}`), 0644)
+	tarball := filepath.Join(tmp, "test.tar.gz")
+	os.WriteFile(tarball, []byte("tarball data"), 0644)
+
+	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
+	_, err := c.UpdateApp("app-123", manifestFile, tarball)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpdateApp_Failure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+		w.Write([]byte(`{"message":"internal error"}`))
+	}))
+	defer srv.Close()
+
+	tmp := t.TempDir()
+	manifestFile := filepath.Join(tmp, "CloudronManifest.json")
+	os.WriteFile(manifestFile, []byte(`{"id":"io.test"}`), 0644)
+	tarball := filepath.Join(tmp, "test.tar.gz")
+	os.WriteFile(tarball, []byte("data"), 0644)
+
+	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
+	_, err := c.UpdateApp("app-123", manifestFile, tarball)
+	if err == nil || !strings.Contains(err.Error(), "500") {
+		t.Fatalf("expected 500 error, got %v", err)
+	}
+}
+
+func TestUpdateApp_InvalidManifest(t *testing.T) {
+	tmp := t.TempDir()
+	manifestFile := filepath.Join(tmp, "CloudronManifest.json")
+	os.WriteFile(manifestFile, []byte(`not json`), 0644)
+	tarball := filepath.Join(tmp, "test.tar.gz")
+	os.WriteFile(tarball, []byte("data"), 0644)
+
+	c := &Client{baseURL: "https://example.com", token: "tok", httpClient: http.DefaultClient}
+	_, err := c.UpdateApp("app-123", manifestFile, tarball)
+	if err == nil {
+		t.Fatal("expected JSON error")
+	}
+}
+
+func TestUpdateApp_MissingTarball(t *testing.T) {
+	tmp := t.TempDir()
+	manifestFile := filepath.Join(tmp, "CloudronManifest.json")
+	os.WriteFile(manifestFile, []byte(`{"id":"io.test"}`), 0644)
+
+	c := &Client{baseURL: "https://example.com", token: "tok", httpClient: http.DefaultClient}
+	_, err := c.UpdateApp("app-123", manifestFile, "/nonexistent.tar.gz")
+	if err == nil {
+		t.Fatal("expected file not found error")
+	}
+}
+
+// === extractDomain tests ===
+
+func TestExtractDomain(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"https://my.example.com", "example.com"},
+		{"https://cloudron.io", "cloudron.io"},
+		{"https://my.192.168.1.50.nip.io", "192.168.1.50.nip.io"},
+		{"https://example.com:8443", "example.com"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := extractDomain(tt.input)
+			if got != tt.want {
+				t.Fatalf("extractDomain(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }

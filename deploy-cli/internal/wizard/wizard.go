@@ -18,11 +18,12 @@ var ValidSubdomain = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 // Config holds the deployment configuration collected from the user.
 type Config struct {
 	CloudronURL     string
-	Token           string
+	Username        string
+	Password        string
 	Subdomain       string
 	AllowSelfSigned bool
-	BuildServiceURL string
-	BuildToken      string
+	// Token is set externally after login, or via CLOUDRON_TOKEN env var (legacy).
+	Token string
 }
 
 // StdinReader is the buffered reader from the last Run() call.
@@ -36,85 +37,97 @@ func Run() (*Config, error) {
 }
 
 // RunWithIO executes the interactive wizard with injectable IO for testing.
-// Step numbering is dynamic — skipped steps (via env vars) don't leave gaps.
 func RunWithIO(r io.Reader, w io.Writer) (*Config, error) {
-	return runWithReader(bufio.NewReader(r), w)
+	br := bufio.NewReader(r)
+	StdinReader = br
+	return runWithReader(br, w)
 }
 
 func runWithReader(reader *bufio.Reader, w io.Writer) (*Config, error) {
 	config := &Config{}
 
-	// Check env vars to determine which steps to show
+	// Check for legacy CLOUDRON_TOKEN env var (backward compat for scripts)
 	envToken := os.Getenv("CLOUDRON_TOKEN")
-	envBuildURL := os.Getenv("CLOUDRON_BUILD_SERVICE_URL")
-	envBuildToken := os.Getenv("CLOUDRON_BUILD_TOKEN")
-
-	// Count total interactive steps
-	totalSteps := 4 // URL + Token + Subdomain + Build Service
 	if envToken != "" {
-		totalSteps--
+		return runLegacyFlow(reader, w, config, envToken)
 	}
-	if envBuildURL != "" {
-		totalSteps--
-	}
-	step := 0
 
-	// --- Cloudron URL ---
-	step++
-	fmt.Fprintf(w, "Step %d/%d: Enter your Cloudron URL\n", step, totalSteps)
+	// v2.0 flow: URL → Username → Password (3 steps)
+	totalSteps := 3
+
+	// --- Step 1: Cloudron URL ---
+	fmt.Fprintf(w, "Step 1/%d: Enter your Cloudron URL\n", totalSteps)
 	fmt.Fprintln(w, "   Example: https://my.example.com")
 	fmt.Fprint(w, "   URL: ")
 	rawURL, err := readLine(reader)
 	if err != nil {
 		return nil, err
 	}
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" {
-		return nil, fmt.Errorf("URL is required")
-	}
-	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
-		rawURL = "https://" + rawURL
-	}
-	rawURL = strings.TrimRight(rawURL, "/")
-
-	u, err := url.Parse(rawURL)
-	if err != nil || u.Host == "" || u.Hostname() == "" {
-		return nil, fmt.Errorf("invalid URL: %s", rawURL)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, fmt.Errorf("invalid URL: %s (only http/https supported)", rawURL)
-	}
-	config.CloudronURL = u.Scheme + "://" + u.Host
-
-	// --- API Token ---
-	if envToken != "" {
-		fmt.Fprintln(w, "\n   Using API token from CLOUDRON_TOKEN environment variable.")
-		config.Token = envToken
-	} else {
-		step++
-		fmt.Fprintln(w)
-		fmt.Fprintf(w, "Step %d/%d: Enter your API token\n", step, totalSteps)
-		fmt.Fprintf(w, "   Create one at: %s/#/settings (Profile > API Access)\n", config.CloudronURL)
-		fmt.Fprint(w, "   Token: ")
-		token, err := readLine(reader)
-		if err != nil {
-			return nil, err
-		}
-		token = strings.TrimSpace(token)
-		if token == "" {
-			return nil, fmt.Errorf("API token is required")
-		}
-		config.Token = token
+	if err := parseAndSetURL(config, rawURL); err != nil {
+		return nil, err
 	}
 
-	// --- Subdomain ---
-	step++
+	// --- Step 2: Username ---
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Step %d/%d: Choose a subdomain for your app\n", step, totalSteps)
-	domain := u.Hostname()
-	if strings.HasPrefix(domain, "my.") {
-		domain = domain[3:]
+	fmt.Fprintf(w, "Step 2/%d: Enter your Cloudron username\n", totalSteps)
+	fmt.Fprint(w, "   Username: ")
+	username, err := readLine(reader)
+	if err != nil {
+		return nil, err
 	}
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return nil, fmt.Errorf("username is required")
+	}
+	config.Username = username
+
+	// --- Step 3: Password ---
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "Step 3/%d: Enter your Cloudron password\n", totalSteps)
+	fmt.Fprint(w, "   Password: ")
+	password, err := readLine(reader)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(password) == "" {
+		return nil, fmt.Errorf("password is required")
+	}
+	config.Password = password
+
+	// Self-signed cert detection
+	if isDevInstance(config.CloudronURL) {
+		config.AllowSelfSigned = true
+		fmt.Fprintln(w, "\n   ⚠️  Dev instance detected — self-signed certificates will be accepted.")
+		fmt.Fprintln(w, "   WARNING: TLS verification is disabled. Do not use this in production.")
+	}
+
+	fmt.Fprintln(w)
+	return config, nil
+}
+
+// runLegacyFlow handles the CLOUDRON_TOKEN env var for backward compatibility.
+func runLegacyFlow(reader *bufio.Reader, w io.Writer, config *Config, token string) (*Config, error) {
+	config.Token = token
+	fmt.Fprintln(w, "   Using API token from CLOUDRON_TOKEN environment variable.")
+
+	totalSteps := 2
+
+	// --- Step 1: Cloudron URL ---
+	fmt.Fprintf(w, "\nStep 1/%d: Enter your Cloudron URL\n", totalSteps)
+	fmt.Fprintln(w, "   Example: https://my.example.com")
+	fmt.Fprint(w, "   URL: ")
+	rawURL, err := readLine(reader)
+	if err != nil {
+		return nil, err
+	}
+	if err := parseAndSetURL(config, rawURL); err != nil {
+		return nil, err
+	}
+
+	// --- Step 2: Subdomain ---
+	fmt.Fprintln(w)
+	domain := extractDomain(config.CloudronURL)
+	fmt.Fprintf(w, "Step 2/%d: Choose a subdomain for your app\n", totalSteps)
 	fmt.Fprintf(w, "   Example: myapp  (your app will be at myapp.%s)\n", domain)
 	fmt.Fprint(w, "   Subdomain: ")
 	subdomain, err := readLine(reader)
@@ -127,50 +140,7 @@ func runWithReader(reader *bufio.Reader, w io.Writer) (*Config, error) {
 	}
 	config.Subdomain = subdomain
 
-	// --- Build Service ---
-	if envBuildURL != "" {
-		if envBuildToken == "" {
-			return nil, fmt.Errorf("CLOUDRON_BUILD_SERVICE_URL is set but CLOUDRON_BUILD_TOKEN is missing.\n   Set CLOUDRON_BUILD_TOKEN to your Build Service token")
-		}
-		config.BuildServiceURL = envBuildURL
-		config.BuildToken = envBuildToken
-		fmt.Fprintln(w, "\n   Using Build Service from environment variables.")
-	} else {
-		step++
-		fmt.Fprintln(w)
-		fmt.Fprintf(w, "Step %d/%d: Build Service (builds Docker images on your Cloudron)\n", step, totalSteps)
-		fmt.Fprintln(w, "   This is the Cloudron app that builds Docker images server-side.")
-		fmt.Fprintln(w, "   You need the Docker Builder app installed on your Cloudron.")
-		fmt.Fprint(w, "   Build Service URL (e.g., devtools.example.com): ")
-		buildURL, err := readLine(reader)
-		if err != nil && err != io.EOF {
-			return nil, err
-		}
-		buildURL = strings.TrimSpace(buildURL)
-		if buildURL != "" {
-			if !strings.HasPrefix(buildURL, "http://") && !strings.HasPrefix(buildURL, "https://") {
-				buildURL = "https://" + buildURL
-			}
-			buildURL = strings.TrimRight(buildURL, "/")
-			config.BuildServiceURL = buildURL
-
-			fmt.Fprintln(w)
-			fmt.Fprintf(w, "   To get your Build Service token:\n")
-			fmt.Fprintf(w, "   1. Open %s in your browser\n", buildURL)
-			fmt.Fprintf(w, "   2. Log in with your Cloudron account\n")
-			fmt.Fprintf(w, "   3. Copy the token from the Setup page\n")
-			fmt.Fprint(w, "   Build Service Token: ")
-			bt, _ := readLine(reader)
-			bt = strings.TrimSpace(bt)
-			if bt == "" {
-				return nil, fmt.Errorf("Build Service token is required.\n   Get it from: %s (log in → Setup page)", buildURL)
-			}
-			config.BuildToken = bt
-		}
-	}
-
-	// Self-signed cert detection
-	if isDevInstance(rawURL) {
+	if isDevInstance(config.CloudronURL) {
 		config.AllowSelfSigned = true
 		fmt.Fprintln(w, "\n   ⚠️  Dev instance detected — self-signed certificates will be accepted.")
 		fmt.Fprintln(w, "   WARNING: TLS verification is disabled. Do not use this in production.")
@@ -181,13 +151,20 @@ func runWithReader(reader *bufio.Reader, w io.Writer) (*Config, error) {
 }
 
 // AskSubdomain prompts for a subdomain if not already provided.
+// Uses StdinReader if available (set by Run) to avoid losing buffered data.
 func AskSubdomain() (string, error) {
+	if StdinReader != nil {
+		return askSubdomainWithReader(StdinReader, os.Stdout)
+	}
 	return AskSubdomainWithIO(os.Stdin, os.Stdout)
 }
 
 // AskSubdomainWithIO prompts for a subdomain with injectable IO.
 func AskSubdomainWithIO(r io.Reader, w io.Writer) (string, error) {
-	reader := bufio.NewReader(r)
+	return askSubdomainWithReader(bufio.NewReader(r), w)
+}
+
+func askSubdomainWithReader(reader *bufio.Reader, w io.Writer) (string, error) {
 	fmt.Fprint(w, "   Subdomain for your app: ")
 	sub, err := readLine(reader)
 	if err != nil {
@@ -203,9 +180,70 @@ func AskSubdomainWithIO(r io.Reader, w io.Writer) (string, error) {
 	return sub, nil
 }
 
+// Ask2FA prompts for a TOTP code when 2FA is required.
+// Uses StdinReader if available (set by Run) to avoid losing buffered data.
+func Ask2FA() (string, error) {
+	if StdinReader != nil {
+		return ask2FAWithReader(StdinReader, os.Stdout)
+	}
+	return Ask2FAWithIO(os.Stdin, os.Stdout)
+}
+
+// Ask2FAWithIO prompts for a TOTP code with injectable IO.
+func Ask2FAWithIO(r io.Reader, w io.Writer) (string, error) {
+	return ask2FAWithReader(bufio.NewReader(r), w)
+}
+
+func ask2FAWithReader(reader *bufio.Reader, w io.Writer) (string, error) {
+	fmt.Fprintln(w, "\n   🔐 Two-factor authentication required.")
+	fmt.Fprint(w, "   Enter your 6-digit code: ")
+	code, err := readLine(reader)
+	if err != nil {
+		return "", err
+	}
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return "", fmt.Errorf("2FA code is required")
+	}
+	return code, nil // TOTP codes are numeric, trimming whitespace is safe
+}
+
+// parseAndSetURL validates and normalizes the Cloudron URL into config.
+func parseAndSetURL(config *Config, rawURL string) error {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return fmt.Errorf("URL is required")
+	}
+	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
+		rawURL = "https://" + rawURL
+	}
+	rawURL = strings.TrimRight(rawURL, "/")
+
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" || u.Hostname() == "" {
+		return fmt.Errorf("invalid URL: %s", rawURL)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("invalid URL: %s (only http/https supported)", rawURL)
+	}
+	config.CloudronURL = u.Scheme + "://" + u.Host
+	return nil
+}
+
+// extractDomain returns the bare domain from a Cloudron URL (strips "my." prefix).
+func extractDomain(cloudronURL string) string {
+	u, _ := url.Parse(cloudronURL)
+	if u == nil {
+		return ""
+	}
+	host := u.Hostname()
+	if strings.HasPrefix(host, "my.") {
+		return host[3:]
+	}
+	return host
+}
+
 // isDevInstance returns true if the URL looks like a development Cloudron instance.
-// Checks are performed on the parsed hostname to avoid false positives
-// (e.g., "api.v10.example.com" should NOT trigger TLS bypass).
 func isDevInstance(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -221,7 +259,6 @@ func isDevInstance(rawURL string) bool {
 
 func readLine(reader *bufio.Reader) (string, error) {
 	line, err := reader.ReadString('\n')
-	// Accept partial data on EOF (piped input without trailing newline)
 	if err == io.EOF && len(line) > 0 {
 		return strings.TrimRight(line, "\r\n"), nil
 	}

@@ -1,5 +1,5 @@
 // Package api provides a client for the Cloudron REST API.
-// Handles authentication, image building via Build Service, and app installation.
+// Handles authentication via login, and app installation via direct sourceArchive upload.
 // Uses only stdlib net/http — no external dependencies.
 package api
 
@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -18,13 +19,14 @@ import (
 	"time"
 )
 
-// Client wraps HTTP calls to the Cloudron API and Build Service.
+// Err2FARequired is returned by Login when the server requires a TOTP code.
+var Err2FARequired = errors.New("2FA required")
+
+// Client wraps HTTP calls to the Cloudron API.
 type Client struct {
-	baseURL         string
-	token           string
-	buildServiceURL string // separate Build Service (e.g., devtools.DOMAIN)
-	buildToken      string // Build Service auth token (may differ from Cloudron token)
-	httpClient      *http.Client
+	baseURL    string
+	token      string
+	httpClient *http.Client
 }
 
 // CloudronInfo holds basic server info from GET /api/v1/cloudron/status.
@@ -35,6 +37,7 @@ type CloudronInfo struct {
 }
 
 // NewClient creates a new Cloudron API client.
+// If token is provided (legacy flow), it's used directly for Bearer auth.
 func NewClient(baseURL, token string, allowSelfSigned bool) *Client {
 	transport := &http.Transport{}
 	if allowSelfSigned {
@@ -50,16 +53,83 @@ func NewClient(baseURL, token string, allowSelfSigned bool) *Client {
 	}
 }
 
-// SetBuildService configures a separate Build Service for image building.
-func (c *Client) SetBuildService(url, token string) {
-	c.buildServiceURL = url
-	c.buildToken = token
+// Login authenticates with username/password and stores the access token.
+// If 2FA is enabled, returns Err2FARequired on the first call.
+// Call LoginWith2FA to retry with the TOTP code.
+func (c *Client) Login(username, password string) error {
+	return c.doLogin(username, password, "")
+}
+
+// LoginWith2FA authenticates with username/password and a TOTP code.
+func (c *Client) LoginWith2FA(username, password, totpToken string) error {
+	return c.doLogin(username, password, totpToken)
+}
+
+func (c *Client) doLogin(username, password, totpToken string) error {
+	payload := map[string]string{
+		"username": username,
+		"password": password,
+	}
+	if totpToken != "" {
+		payload["totpToken"] = totpToken
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/auth/login", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("login request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return fmt.Errorf("reading login response: %w", err)
+	}
+
+	if resp.StatusCode == 401 {
+		// Check if 2FA is required vs invalid credentials
+		msg := string(respBody)
+		if strings.Contains(msg, "totpToken") {
+			return Err2FARequired
+		}
+		return fmt.Errorf("invalid username or password")
+	}
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("login failed (HTTP %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		Token       string `json:"token"`
+		AccessToken string `json:"accessToken"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return fmt.Errorf("invalid login response: %w", err)
+	}
+
+	token := result.AccessToken
+	if token == "" {
+		token = result.Token
+	}
+	if token == "" {
+		return fmt.Errorf("login succeeded but no token returned")
+	}
+	c.token = token
+	return nil
 }
 
 // GetCloudronInfo fetches server info to verify connectivity + auth.
-// Uses /api/v1/cloudron/status for version, then /api/v1/profile for auth check.
 func (c *Client) GetCloudronInfo() (*CloudronInfo, error) {
-	// First check auth via /api/v1/profile
 	profileResp, err := c.get("/api/v1/profile")
 	if err != nil {
 		return nil, fmt.Errorf("connection failed: %w", err)
@@ -73,24 +143,25 @@ func (c *Client) GetCloudronInfo() (*CloudronInfo, error) {
 		return nil, fmt.Errorf("unexpected status %d from Cloudron API", profileResp.StatusCode)
 	}
 
-	// Get version info
 	statusResp, err := c.get("/api/v1/cloudron/status")
 	if err != nil {
 		return nil, fmt.Errorf("cannot get Cloudron status: %w", err)
 	}
 	defer statusResp.Body.Close()
 
+	if statusResp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status %d from /api/v1/cloudron/status", statusResp.StatusCode)
+	}
+
 	var info CloudronInfo
 	if err := json.NewDecoder(statusResp.Body).Decode(&info); err != nil {
 		return nil, fmt.Errorf("invalid response: %w", err)
 	}
 
-	// Extract domain from baseURL for convenience
 	if info.Domain == "" {
 		u, _ := url.Parse(c.baseURL)
 		if u != nil {
 			host := u.Hostname()
-			// Strip "my." prefix to get the bare domain
 			if strings.HasPrefix(host, "my.") {
 				info.Domain = host[3:]
 			} else {
@@ -102,249 +173,15 @@ func (c *Client) GetCloudronInfo() (*CloudronInfo, error) {
 	return &info, nil
 }
 
-// VerifyBuildService checks connectivity and auth to the Build Service.
-// Call this before BuildImage to give early, actionable error messages.
-// The Build Service uses ?accessToken= query params (not Bearer headers).
-func (c *Client) VerifyBuildService() error {
-	if c.buildServiceURL == "" {
-		return fmt.Errorf("no Build Service configured.\n   Set it with CLOUDRON_BUILD_SERVICE_URL or enter it in the wizard")
-	}
-	if c.buildToken == "" {
-		return fmt.Errorf("no Build Service token provided.\n   Get it from the Build Service Setup page: %s\n   Or set CLOUDRON_BUILD_TOKEN env var", c.buildServiceURL)
-	}
-
-	// Use /api/v1/profile with accessToken — same endpoint the cloudron CLI uses
-	req, err := http.NewRequest("GET", c.buildServiceURL+"/api/v1/profile?accessToken="+url.QueryEscape(c.buildToken), nil)
-	if err != nil {
-		return fmt.Errorf("invalid Build Service URL: %w", err)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("cannot reach Build Service at %s: %w", c.buildServiceURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		return fmt.Errorf("Build Service auth failed (HTTP %d).\n   Your Build Service token may be invalid or expired.\n   Get a new token from: %s", resp.StatusCode, c.buildServiceURL)
-	}
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("Build Service returned HTTP %d.\n   Check that %s is the correct URL", resp.StatusCode, c.buildServiceURL)
-	}
-	return nil
-}
-
-// detectImageRepo auto-detects the Docker image repository from previous builds.
-// Falls back to the Build Service hostname if no prior builds exist.
-func (c *Client) detectImageRepo() string {
-	// Check DOCKER_IMAGE_REPO env var first (explicit override)
-	if envRepo := os.Getenv("DOCKER_IMAGE_REPO"); envRepo != "" {
-		return envRepo
-	}
-
-	// Try to learn from previous successful builds
-	req, err := http.NewRequest("GET", c.buildServiceURL+"/api/v1/builds?accessToken="+url.QueryEscape(c.buildToken), nil)
-	if err == nil {
-		resp, err := c.httpClient.Do(req)
-		if err == nil {
-			defer resp.Body.Close()
-			var result struct {
-				Builds []struct {
-					DockerImageRepo string `json:"dockerImageRepo"`
-					Status          string `json:"status"`
-				} `json:"builds"`
-			}
-			if json.NewDecoder(resp.Body).Decode(&result) == nil {
-				// Find the last successful build's repo
-				for i := len(result.Builds) - 1; i >= 0; i-- {
-					b := result.Builds[i]
-					if b.Status == "success" && b.DockerImageRepo != "" {
-						return b.DockerImageRepo
-					}
-				}
-			}
-		}
-	}
-
-	// Fallback: use Build Service hostname as registry (works for builder-registry combo)
-	u, _ := url.Parse(c.buildServiceURL)
-	return u.Host + "/fastpack-app"
-}
-
-// BuildImage uploads a tarball to the Build Service and returns the image tag.
-// The Build Service builds the Docker image server-side — no local Docker needed.
-// It uses the separate Build Service URL (e.g., devtools.DOMAIN) with its own auth.
-func (c *Client) BuildImage(tarballPath string) (string, error) {
-	buildURL := c.buildServiceURL
-	buildToken := c.buildToken
-	if buildURL == "" {
-		return "", fmt.Errorf("no Build Service configured.\n   Set it with CLOUDRON_BUILD_SERVICE_URL or enter it in the wizard")
-	}
-	if buildToken == "" {
-		return "", fmt.Errorf("no Build Service token.\n   Get it from the Build Service Setup page: %s\n   Or set CLOUDRON_BUILD_TOKEN env var", buildURL)
-	}
-
-	// Auto-detect the Docker image repository
-	imageRepo := c.detectImageRepo()
-
-	// Open the tarball
-	f, err := os.Open(tarballPath)
-	if err != nil {
-		return "", fmt.Errorf("cannot open tarball: %w", err)
-	}
-	defer f.Close()
-
-	// Create multipart form matching the Cloudron Build Service API:
-	//   sourceArchive: the tarball file
-	//   dockerImageRepo: registry/image name
-	//   dockerImageTag: image tag
-	var buf bytes.Buffer
-	writer := multipart.NewWriter(&buf)
-
-	writer.WriteField("dockerImageRepo", imageRepo)
-	writer.WriteField("dockerImageTag", "latest")
-	writer.WriteField("buildArgs", "{}")
-
-	// Add the source archive
-	part, err := writer.CreateFormFile("sourceArchive", filepath.Base(tarballPath))
-	if err != nil {
-		return "", fmt.Errorf("multipart error: %w", err)
-	}
-	if _, err := io.Copy(part, f); err != nil {
-		return "", fmt.Errorf("file copy error: %w", err)
-	}
-	writer.Close()
-
-	// POST to Build Service /api/v1/builds?accessToken=...
-	// Cloudron Build Service uses accessToken query param, not Bearer headers
-	req, err := http.NewRequest("POST", buildURL+"/api/v1/builds?accessToken="+url.QueryEscape(buildToken), &buf)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("upload failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	switch resp.StatusCode {
-	case 401, 403:
-		return "", fmt.Errorf("Build Service auth failed (HTTP %d).\n   Your Build Service token may be invalid or expired.\n   Get a new token from: %s", resp.StatusCode, buildURL)
-	case 409:
-		return "", fmt.Errorf("build conflict: another build may be in progress (HTTP 409)")
-	case 413:
-		return "", fmt.Errorf("package too large for Build Service (HTTP 413). Max size may be exceeded")
-	}
-	if resp.StatusCode != 200 && resp.StatusCode != 201 && resp.StatusCode != 202 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return "", fmt.Errorf("build failed (HTTP %d): %s", resp.StatusCode, string(body))
-	}
-
-	// Parse response for build ID and image tag
-	var result struct {
-		ID    string `json:"id"`
-		Image string `json:"image"`
-		Tag   string `json:"tag"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("invalid build response: %w", err)
-	}
-
-	// If the response includes an image tag directly, use it.
-	// Otherwise poll for build completion.
-	imageTag := result.Image
-	if imageTag == "" && result.Tag != "" {
-		imageTag = result.Tag
-	}
-
-	if imageTag == "" && result.ID != "" {
-		imageTag, err = c.waitForBuild(buildURL, buildToken, result.ID)
-		if err != nil {
-			return "", err
-		}
-	}
-
-	// If still no image tag, construct it from what we sent.
-	// The Cloudron Build Service doesn't always return the tag in poll responses —
-	// the official cloudron CLI constructs it from the request parameters.
-	if imageTag == "" {
-		imageTag = imageRepo + ":latest"
-	}
-
-	return imageTag, nil
-}
-
-// waitForBuild polls the Build Service until a build completes.
-// Uses exponential backoff (3s → 5s → 8s → 10s cap) and prints progress dots.
-func (c *Client) waitForBuild(buildURL, token, buildID string) (string, error) {
-	interval := 3 * time.Second
-	maxInterval := 10 * time.Second
-	deadline := time.Now().Add(10 * time.Minute)
-	networkErrors := 0
-
-	for time.Now().Before(deadline) {
-		time.Sleep(interval)
-		fmt.Print(".")
-
-		req, err := http.NewRequest("GET", buildURL+"/api/v1/builds/"+buildID+"?accessToken="+url.QueryEscape(token), nil)
-		if err != nil {
-			return "", err
-		}
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			networkErrors++
-			if networkErrors > 5 {
-				return "", fmt.Errorf("too many network errors polling build status: %w", err)
-			}
-			interval = min(interval*3/2, maxInterval)
-			continue
-		}
-
-		var status struct {
-			Status string `json:"status"`
-			Image  string `json:"image"`
-			Tag    string `json:"tag"`
-			Error  string `json:"error"`
-		}
-		if decErr := json.NewDecoder(resp.Body).Decode(&status); decErr != nil {
-			resp.Body.Close()
-			interval = min(interval*3/2, maxInterval)
-			continue
-		}
-		resp.Body.Close()
-		networkErrors = 0
-
-		switch status.Status {
-		case "success", "completed", "pushed":
-			tag := status.Image
-			if tag == "" {
-				tag = status.Tag
-			}
-			// Build completed — return whatever tag we have (may be empty;
-			// caller will construct it from the request parameters)
-			return tag, nil
-		case "error", "failed":
-			return "", fmt.Errorf("build failed: %s", status.Error)
-		}
-		// "building", "pending" → backoff and keep polling
-		interval = min(interval*3/2, maxInterval)
-	}
-	return "", fmt.Errorf("build timed out after 10 minutes")
-}
-
 // AppInfo holds basic information about an installed Cloudron app.
 type AppInfo struct {
 	ID        string `json:"id"`
 	Subdomain string `json:"subdomain"`
 	Domain    string `json:"domain"`
-	FQDN      string `json:"fqdn"`
+	FQDN     string `json:"fqdn"`
 }
 
 // FindAppBySubdomain checks if an app is already installed at the given subdomain.
-// Returns the app info if found, nil if not found.
 func (c *Client) FindAppBySubdomain(subdomain string) (*AppInfo, error) {
 	resp, err := c.get("/api/v1/apps")
 	if err != nil {
@@ -367,101 +204,44 @@ func (c *Client) FindAppBySubdomain(subdomain string) (*AppInfo, error) {
 	return nil, nil
 }
 
-// UpdateApp updates an existing app with a new image.
-// Cloudron v9 API: POST /api/v1/apps/{id}/update.
-func (c *Client) UpdateApp(appID, manifestPath, imageTag string) (string, error) {
+// InstallApp installs a NEW app on Cloudron using direct sourceArchive upload.
+// Cloudron v9 API: POST /api/v1/apps (multipart/form-data).
+// Fields: manifest (JSON string), subdomain, domain, accessRestriction, sourceArchive (file).
+func (c *Client) InstallApp(manifestPath, tarballPath, subdomain string) (string, error) {
 	manifestData, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return "", fmt.Errorf("cannot read manifest: %w", err)
 	}
 
-	var manifest map[string]any
-	if err := json.Unmarshal(manifestData, &manifest); err != nil {
-		return "", fmt.Errorf("invalid manifest JSON: %w", err)
+	// Validate manifest is valid JSON
+	if !json.Valid(manifestData) {
+		return "", fmt.Errorf("invalid manifest JSON in %s", manifestPath)
 	}
-
-	manifest["dockerImage"] = imageTag
-
-	payload := map[string]any{
-		"appStoreId":       "",
-		"manifest":         manifest,
-		"skipBackup":       false,
-		"skipNotification": true,
-		"force":            true,
-	}
-
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-
-	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/apps/"+appID+"/update", bytes.NewReader(payloadBytes))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("update request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 && resp.StatusCode != 202 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return "", fmt.Errorf("update failed (HTTP %d): %s", resp.StatusCode, string(body))
-	}
-
-	return fmt.Sprintf("https://%s (updated)", appID), nil
-}
-
-// InstallApp installs a NEW app on Cloudron using the built image.
-// Cloudron v9 API: POST /api/v1/apps with {subdomain, domain, manifest}.
-// The dockerImage goes INSIDE the manifest object, not as a separate field.
-func (c *Client) InstallApp(manifestPath, imageTag, subdomain string) (string, error) {
-	// Read manifest
-	manifestData, err := os.ReadFile(manifestPath)
-	if err != nil {
-		return "", fmt.Errorf("cannot read manifest: %w", err)
-	}
-
-	var manifest map[string]any
-	if err := json.Unmarshal(manifestData, &manifest); err != nil {
-		return "", fmt.Errorf("invalid manifest JSON: %w", err)
-	}
-
-	// Set dockerImage inside the manifest (Cloudron v9 API requirement)
-	manifest["dockerImage"] = imageTag
 
 	// Extract domain from baseURL
-	u, _ := url.Parse(c.baseURL)
-	domain := u.Hostname()
-	if strings.HasPrefix(domain, "my.") {
-		domain = domain[3:]
-	}
+	domain := extractDomain(c.baseURL)
 
-	// Build install payload (Cloudron v9 format)
-	payload := map[string]any{
-		"appStoreId":       "",
-		"manifest":         manifest,
-		"subdomain":        subdomain,
-		"domain":           domain,
-		"accessRestriction": nil,
-	}
+	// Build multipart form
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
 
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
+	writer.WriteField("manifest", string(manifestData))
+	writer.WriteField("subdomain", subdomain)
+	writer.WriteField("domain", domain)
+	writer.WriteField("accessRestriction", `{"users":[],"groups":[]}`)
+
+	// Add sourceArchive file
+	if err := addFileField(writer, "sourceArchive", tarballPath); err != nil {
 		return "", err
 	}
+	writer.Close()
 
-	// POST /api/v1/apps
-	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/apps", bytes.NewReader(payloadBytes))
+	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/apps", &buf)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -477,20 +257,94 @@ func (c *Client) InstallApp(manifestPath, imageTag, subdomain string) (string, e
 		return "", fmt.Errorf("install failed (HTTP %d): %s", resp.StatusCode, string(body))
 	}
 
-	// Parse response for app URL
 	var result struct {
-		ID       string `json:"id"`
-		Location string `json:"location"`
-		FQDN     string `json:"fqdn"`
+		ID   string `json:"id"`
+		FQDN string `json:"fqdn"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Sprintf("https://%s", subdomain), nil
+		return fmt.Sprintf("https://%s.%s", subdomain, domain), nil
 	}
 
 	if result.FQDN != "" {
 		return "https://" + result.FQDN, nil
 	}
-	return fmt.Sprintf("https://%s (app ID: %s)", subdomain, result.ID), nil
+	return fmt.Sprintf("https://%s.%s (app ID: %s)", subdomain, domain, result.ID), nil
+}
+
+// UpdateApp updates an existing app with a new sourceArchive.
+// Cloudron v9 API: POST /api/v1/apps/{id}/update (multipart/form-data).
+func (c *Client) UpdateApp(appID, manifestPath, tarballPath string) (string, error) {
+	manifestData, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return "", fmt.Errorf("cannot read manifest: %w", err)
+	}
+
+	if !json.Valid(manifestData) {
+		return "", fmt.Errorf("invalid manifest JSON in %s", manifestPath)
+	}
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	writer.WriteField("manifest", string(manifestData))
+	writer.WriteField("force", "true")
+
+	// Add sourceArchive file
+	if err := addFileField(writer, "sourceArchive", tarballPath); err != nil {
+		return "", err
+	}
+	writer.Close()
+
+	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/apps/"+appID+"/update", &buf)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("update request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 && resp.StatusCode != 202 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return "", fmt.Errorf("update failed (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	return fmt.Sprintf("https://%s (updated)", appID), nil
+}
+
+// addFileField adds a file from disk as a multipart form file field.
+func addFileField(writer *multipart.Writer, fieldName, filePath string) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("cannot open %s: %w", fieldName, err)
+	}
+	defer f.Close()
+
+	part, err := writer.CreateFormFile(fieldName, filepath.Base(filePath))
+	if err != nil {
+		return fmt.Errorf("multipart error for %s: %w", fieldName, err)
+	}
+	if _, err := io.Copy(part, f); err != nil {
+		return fmt.Errorf("file copy error for %s: %w", fieldName, err)
+	}
+	return nil
+}
+
+// extractDomain returns the bare domain from a Cloudron base URL.
+func extractDomain(baseURL string) string {
+	u, _ := url.Parse(baseURL)
+	if u == nil {
+		return ""
+	}
+	host := u.Hostname()
+	if strings.HasPrefix(host, "my.") {
+		return host[3:]
+	}
+	return host
 }
 
 // get performs an authenticated GET request.

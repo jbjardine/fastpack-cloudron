@@ -1,9 +1,10 @@
 // FastPack Deploy CLI — zero-dependency Cloudron deployer
-// Builds Docker images on the user's Cloudron Build Service and installs via API.
+// Deploys apps directly to Cloudron via sourceArchive upload. No Build Service needed.
 // Cross-platform: Windows, macOS, Linux. No Node.js, no cloudron CLI, no Docker needed.
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,7 @@ import (
 	"github.com/jbjardine/fastpack-cloudron/deploy-cli/internal/wizard"
 )
 
-const version = "1.1.0"
+const version = "2.0.0"
 
 func main() {
 	fmt.Println("╔══════════════════════════════════════╗")
@@ -36,34 +37,43 @@ func main() {
 
 	fmt.Printf("📦 Package found in %s\n\n", dir)
 
-	// Step 2: Interactive wizard — ask for Cloudron URL + API token
+	// Step 2: Interactive wizard — ask for Cloudron URL + credentials
 	config, err := wizard.Run()
 	if err != nil {
 		fatal("Setup cancelled: %v", err)
 	}
 
-	// Step 3: Verify connection to Cloudron
-	fmt.Print("🔗 Connecting to Cloudron... ")
+	// Step 3: Authenticate
 	client := api.NewClient(config.CloudronURL, config.Token, config.AllowSelfSigned)
-	if config.BuildServiceURL != "" {
-		client.SetBuildService(config.BuildServiceURL, config.BuildToken)
-	}
-	info, err := client.GetCloudronInfo()
-	if err != nil {
-		fatal("\n❌ Cannot connect: %v\nCheck your URL and API token.", err)
-	}
-	fmt.Printf("OK (%s v%s)\n", info.DisplayName, info.Version)
 
-	// Step 3b: Verify Build Service connection (early auth check)
-	if config.BuildServiceURL != "" {
-		fmt.Print("🔨 Verifying Build Service... ")
-		if err := client.VerifyBuildService(); err != nil {
-			fatal("\n❌ %v", err)
+	if config.Token == "" {
+		// v2.0 flow: login with username/password
+		fmt.Print("🔑 Logging in... ")
+		err = client.Login(config.Username, config.Password)
+		if errors.Is(err, api.Err2FARequired) {
+			fmt.Println("2FA required")
+			code, err2 := wizard.Ask2FA()
+			if err2 != nil {
+				fatal("Setup cancelled: %v", err2)
+			}
+			fmt.Print("🔑 Verifying 2FA... ")
+			err = client.LoginWith2FA(config.Username, config.Password, code)
+		}
+		if err != nil {
+			fatal("\n❌ Login failed: %v\nCheck your username and password.", err)
 		}
 		fmt.Println("OK")
 	}
 
-	// Step 4: Create tarball from package files
+	// Step 4: Verify connection to Cloudron
+	fmt.Print("🔗 Connecting to Cloudron... ")
+	info, err := client.GetCloudronInfo()
+	if err != nil {
+		fatal("\n❌ Cannot connect: %v", err)
+	}
+	fmt.Printf("OK (%s v%s)\n", info.DisplayName, info.Version)
+
+	// Step 5: Create tarball from package files
 	fmt.Print("📦 Packaging files... ")
 	tarball, err := archive.CreateTarball(dir)
 	if err != nil {
@@ -72,15 +82,7 @@ func main() {
 	defer os.Remove(tarball)
 	fmt.Println("OK")
 
-	// Step 5: Upload to Cloudron Build Service and build
-	fmt.Print("🔨 Building on Cloudron (this may take a few minutes)... ")
-	imageTag, err := client.BuildImage(tarball)
-	if err != nil {
-		fatal("\n❌ Build failed: %v", err)
-	}
-	fmt.Printf("OK (image: %s)\n", imageTag)
-
-	// Step 6: Install or update the app
+	// Step 6: Choose subdomain
 	subdomain := config.Subdomain
 	if subdomain == "" {
 		subdomain, err = wizard.AskSubdomain()
@@ -89,13 +91,13 @@ func main() {
 		}
 	}
 
-	// Check if app already exists at this subdomain
+	// Step 7: Check if app already exists
 	existing, _ := client.FindAppBySubdomain(subdomain)
 
 	if existing != nil {
-		// App exists — ask to update (use wizard's buffered reader for piped input compat)
+		// App exists — ask to update
 		fmt.Printf("\n⚠️  App already installed at %s.%s\n", subdomain, info.Domain)
-		fmt.Print("   Update existing app with new image? (y/n): ")
+		fmt.Print("   Update existing app? (y/n): ")
 		answer, _ := wizard.StdinReader.ReadString('\n')
 		answer = strings.TrimSpace(answer)
 		if answer != "y" && answer != "Y" {
@@ -103,20 +105,20 @@ func main() {
 		}
 
 		fmt.Printf("🔄 Updating app %s.%s... ", subdomain, info.Domain)
-		if _, err = client.UpdateApp(existing.ID, manifest, imageTag); err != nil {
+		if _, err = client.UpdateApp(existing.ID, manifest, tarball); err != nil {
 			fatal("\n❌ Update failed: %v", err)
 		}
 		fmt.Println("OK")
 	} else {
 		// New install
-		fmt.Printf("🚀 Installing app at %s.%s... ", subdomain, info.Domain)
-		if _, err = client.InstallApp(manifest, imageTag, subdomain); err != nil {
+		fmt.Printf("🚀 Installing app at %s.%s (this may take a few minutes)... ", subdomain, info.Domain)
+		if _, err = client.InstallApp(manifest, tarball, subdomain); err != nil {
 			fatal("\n❌ Install failed: %v", err)
 		}
 		fmt.Println("OK")
 	}
 
-	// Step 7: Success!
+	// Step 8: Success!
 	action := "deployed"
 	if existing != nil {
 		action = "updated"

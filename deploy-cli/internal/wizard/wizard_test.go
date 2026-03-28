@@ -7,8 +7,10 @@ import (
 	"testing"
 )
 
-func TestRunWithIO_FullFlow(t *testing.T) {
-	in := strings.NewReader("my.example.com\nsecret-token\nmyapp\n")
+// === v2.0 flow tests (URL → Username → Password) ===
+
+func TestRunWithIO_V2Flow(t *testing.T) {
+	in := strings.NewReader("my.example.com\nadmin\nsecret\n")
 	out := new(bytes.Buffer)
 
 	cfg, err := RunWithIO(in, out)
@@ -16,16 +18,26 @@ func TestRunWithIO_FullFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.CloudronURL != "https://my.example.com" {
-		t.Fatalf("url=%q, want https://my.example.com", cfg.CloudronURL)
+		t.Fatalf("url=%q", cfg.CloudronURL)
 	}
-	if cfg.Token != "secret-token" {
-		t.Fatalf("token=%q, want secret-token", cfg.Token)
+	if cfg.Username != "admin" {
+		t.Fatalf("username=%q", cfg.Username)
 	}
-	if cfg.Subdomain != "myapp" {
-		t.Fatalf("subdomain=%q, want myapp", cfg.Subdomain)
+	if cfg.Password != "secret" {
+		t.Fatalf("password=%q", cfg.Password)
 	}
-	if cfg.AllowSelfSigned {
-		t.Fatal("AllowSelfSigned should be false for example.com")
+	if cfg.Token != "" {
+		t.Fatalf("token should be empty in v2 flow, got %q", cfg.Token)
+	}
+	output := out.String()
+	if !strings.Contains(output, "Step 1/3") {
+		t.Fatal("expected Step 1/3")
+	}
+	if !strings.Contains(output, "Step 2/3") {
+		t.Fatal("expected Step 2/3")
+	}
+	if !strings.Contains(output, "Step 3/3") {
+		t.Fatal("expected Step 3/3")
 	}
 }
 
@@ -42,7 +54,7 @@ func TestRunWithIO_URLNormalization(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			in := strings.NewReader(tt.input + "\ntoken\nsub\n")
+			in := strings.NewReader(tt.input + "\nuser\npass\n")
 			out := new(bytes.Buffer)
 			cfg, err := RunWithIO(in, out)
 			if err != nil {
@@ -64,17 +76,26 @@ func TestRunWithIO_EmptyURL(t *testing.T) {
 	}
 }
 
-func TestRunWithIO_EmptyToken(t *testing.T) {
+func TestRunWithIO_EmptyUsername(t *testing.T) {
 	in := strings.NewReader("example.com\n\n")
 	out := new(bytes.Buffer)
 	_, err := RunWithIO(in, out)
-	if err == nil || !strings.Contains(err.Error(), "token is required") {
-		t.Fatalf("expected token required error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "username is required") {
+		t.Fatalf("expected username required error, got %v", err)
+	}
+}
+
+func TestRunWithIO_EmptyPassword(t *testing.T) {
+	in := strings.NewReader("example.com\nadmin\n\n")
+	out := new(bytes.Buffer)
+	_, err := RunWithIO(in, out)
+	if err == nil || !strings.Contains(err.Error(), "password is required") {
+		t.Fatalf("expected password required error, got %v", err)
 	}
 }
 
 func TestRunWithIO_InvalidURL(t *testing.T) {
-	in := strings.NewReader("://bad\ntoken\nsub\n")
+	in := strings.NewReader("://bad\nuser\npass\n")
 	out := new(bytes.Buffer)
 	_, err := RunWithIO(in, out)
 	if err == nil || !strings.Contains(err.Error(), "invalid URL") {
@@ -91,7 +112,7 @@ func TestRunWithIO_SelfSignedDetection(t *testing.T) {
 	}
 	for _, u := range devURLs {
 		t.Run(u, func(t *testing.T) {
-			in := strings.NewReader(u + "\ntoken\nsub\n")
+			in := strings.NewReader(u + "\nuser\npass\n")
 			out := new(bytes.Buffer)
 			cfg, err := RunWithIO(in, out)
 			if err != nil {
@@ -107,11 +128,176 @@ func TestRunWithIO_SelfSignedDetection(t *testing.T) {
 	}
 }
 
-func TestRunWithIO_InvalidSubdomain(t *testing.T) {
+func TestRunWithIO_SelfSignedFalsePositive(t *testing.T) {
+	safeURLs := []string{
+		"api.v10.example.com",
+		"my.example10.com",
+		"10cloud.example.com",
+		"something.10x.io",
+	}
+	for _, u := range safeURLs {
+		t.Run(u, func(t *testing.T) {
+			in := strings.NewReader(u + "\nuser\npass\n")
+			out := new(bytes.Buffer)
+			cfg, err := RunWithIO(in, out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.AllowSelfSigned {
+				t.Fatalf("AllowSelfSigned should be false for production URL %s", u)
+			}
+		})
+	}
+}
+
+func TestRunWithIO_WhitespaceTrimmingURL(t *testing.T) {
+	in := strings.NewReader("  example.com  \nuser\npass\n")
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CloudronURL != "https://example.com" {
+		t.Fatalf("URL should be trimmed, got %q", cfg.CloudronURL)
+	}
+}
+
+func TestRunWithIO_WhitespaceTrimmingUsername(t *testing.T) {
+	in := strings.NewReader("example.com\n  admin  \npass\n")
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Username != "admin" {
+		t.Fatalf("username should be trimmed, got %q", cfg.Username)
+	}
+}
+
+func TestRunWithIO_PasswordPreservesSpaces(t *testing.T) {
+	// Passwords with leading/trailing spaces must be preserved (not trimmed)
+	in := strings.NewReader("example.com\nadmin\n  secret  \n")
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Password != "  secret  " {
+		t.Fatalf("password spaces should be preserved, got %q", cfg.Password)
+	}
+}
+
+func TestRunWithIO_EOFImmediateEmpty(t *testing.T) {
+	in := strings.NewReader("")
+	out := new(bytes.Buffer)
+	_, err := RunWithIO(in, out)
+	if err == nil {
+		t.Fatal("empty EOF should return error")
+	}
+}
+
+func TestRunWithIO_PipedInputNoTrailingNewline(t *testing.T) {
+	in := strings.NewReader("example.com\nadmin\nsecret")
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatalf("piped input without trailing newline should work: %v", err)
+	}
+	if cfg.Username != "admin" {
+		t.Fatalf("username=%q", cfg.Username)
+	}
+	if cfg.Password != "secret" {
+		t.Fatalf("password=%q", cfg.Password)
+	}
+}
+
+func TestRunWithIO_UsernameWhitespaceOnly(t *testing.T) {
+	in := strings.NewReader("example.com\n   \n")
+	out := new(bytes.Buffer)
+	_, err := RunWithIO(in, out)
+	if err == nil || !strings.Contains(err.Error(), "username is required") {
+		t.Fatalf("whitespace-only username should be rejected, got %v", err)
+	}
+}
+
+func TestRunWithIO_PasswordWhitespaceOnly(t *testing.T) {
+	in := strings.NewReader("example.com\nadmin\n   \n")
+	out := new(bytes.Buffer)
+	_, err := RunWithIO(in, out)
+	if err == nil || !strings.Contains(err.Error(), "password is required") {
+		t.Fatalf("whitespace-only password should be rejected, got %v", err)
+	}
+}
+
+func TestRunWithIO_URLWhitespaceOnly(t *testing.T) {
+	in := strings.NewReader("   \n")
+	out := new(bytes.Buffer)
+	_, err := RunWithIO(in, out)
+	if err == nil || !strings.Contains(err.Error(), "URL is required") {
+		t.Fatalf("whitespace-only URL should be rejected, got %v", err)
+	}
+}
+
+func TestRunWithIO_LocalhostWithPort(t *testing.T) {
+	in := strings.NewReader("localhost:3000\nuser\npass\n")
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AllowSelfSigned {
+		t.Fatal("localhost:3000 should trigger AllowSelfSigned")
+	}
+}
+
+// === Legacy flow tests (CLOUDRON_TOKEN env var) ===
+
+func TestRunWithIO_LegacyTokenFlow(t *testing.T) {
+	t.Setenv("CLOUDRON_TOKEN", "env-token-123")
+
+	in := strings.NewReader("example.com\nmyapp\n")
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Token != "env-token-123" {
+		t.Fatalf("token=%q, want env-token-123", cfg.Token)
+	}
+	if cfg.Username != "" {
+		t.Fatalf("username should be empty in legacy flow, got %q", cfg.Username)
+	}
+	output := out.String()
+	if !strings.Contains(output, "CLOUDRON_TOKEN") {
+		t.Fatal("expected message about CLOUDRON_TOKEN")
+	}
+	if !strings.Contains(output, "Step 1/2") {
+		t.Fatal("expected Step 1/2 in legacy flow")
+	}
+}
+
+func TestRunWithIO_LegacyTokenEmptyEnv(t *testing.T) {
+	t.Setenv("CLOUDRON_TOKEN", "")
+
+	// Should fall through to v2 flow
+	in := strings.NewReader("example.com\nadmin\nsecret\n")
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Username != "admin" {
+		t.Fatalf("empty env should use v2 flow, got username=%q", cfg.Username)
+	}
+}
+
+func TestRunWithIO_LegacyInvalidSubdomain(t *testing.T) {
+	t.Setenv("CLOUDRON_TOKEN", "tok")
+
 	invalidSubs := []string{"My-App", "-bad", "a b", "has_underscore", "CAPS"}
 	for _, sub := range invalidSubs {
 		t.Run(sub, func(t *testing.T) {
-			in := strings.NewReader("example.com\ntoken\n" + sub + "\n")
+			in := strings.NewReader("example.com\n" + sub + "\n")
 			out := new(bytes.Buffer)
 			_, err := RunWithIO(in, out)
 			if err == nil || !strings.Contains(err.Error(), "invalid subdomain") {
@@ -121,11 +307,13 @@ func TestRunWithIO_InvalidSubdomain(t *testing.T) {
 	}
 }
 
-func TestRunWithIO_ValidSubdomains(t *testing.T) {
+func TestRunWithIO_LegacyValidSubdomains(t *testing.T) {
+	t.Setenv("CLOUDRON_TOKEN", "tok")
+
 	validSubs := []string{"myapp", "my-app", "app123", "a", "a1b2c3"}
 	for _, sub := range validSubs {
 		t.Run(sub, func(t *testing.T) {
-			in := strings.NewReader("example.com\ntoken\n" + sub + "\n")
+			in := strings.NewReader("example.com\n" + sub + "\n")
 			out := new(bytes.Buffer)
 			cfg, err := RunWithIO(in, out)
 			if err != nil {
@@ -138,8 +326,10 @@ func TestRunWithIO_ValidSubdomains(t *testing.T) {
 	}
 }
 
-func TestRunWithIO_EmptySubdomain(t *testing.T) {
-	in := strings.NewReader("example.com\ntoken\n\n")
+func TestRunWithIO_LegacyEmptySubdomain(t *testing.T) {
+	t.Setenv("CLOUDRON_TOKEN", "tok")
+
+	in := strings.NewReader("example.com\n\n")
 	out := new(bytes.Buffer)
 	cfg, err := RunWithIO(in, out)
 	if err != nil {
@@ -150,23 +340,85 @@ func TestRunWithIO_EmptySubdomain(t *testing.T) {
 	}
 }
 
-func TestRunWithIO_CloudronTokenEnv(t *testing.T) {
-	t.Setenv("CLOUDRON_TOKEN", "env-token-123")
+// === NIP.IO edge cases ===
 
-	// Only need URL and subdomain when CLOUDRON_TOKEN is set
-	in := strings.NewReader("example.com\nmyapp\n")
+func TestRunWithIO_NipIoFalsePositive(t *testing.T) {
+	attackerURLs := []string{
+		"evil.nip.io.attacker.com",
+		"nip.io.evil.com",
+		"my.nip.io.co.uk",
+	}
+	for _, u := range attackerURLs {
+		t.Run(u, func(t *testing.T) {
+			in := strings.NewReader(u + "\nuser\npass\n")
+			out := new(bytes.Buffer)
+			cfg, err := RunWithIO(in, out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.AllowSelfSigned {
+				t.Fatalf("AllowSelfSigned should be false for attacker URL %s", u)
+			}
+		})
+	}
+}
+
+func TestRunWithIO_NipIoTruePositive(t *testing.T) {
+	legit := []string{"192.168.1.50.nip.io", "10.0.0.1.nip.io", "my.app.nip.io"}
+	for _, u := range legit {
+		t.Run(u, func(t *testing.T) {
+			in := strings.NewReader(u + "\nuser\npass\n")
+			out := new(bytes.Buffer)
+			cfg, err := RunWithIO(in, out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !cfg.AllowSelfSigned {
+				t.Fatalf("AllowSelfSigned should be true for legit nip.io URL %s", u)
+			}
+		})
+	}
+}
+
+// === Ask2FA tests ===
+
+func TestAsk2FAWithIO(t *testing.T) {
+	in := strings.NewReader("123456\n")
 	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(in, out)
+	code, err := Ask2FAWithIO(in, out)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Token != "env-token-123" {
-		t.Fatalf("token=%q, want env-token-123", cfg.Token)
+	if code != "123456" {
+		t.Fatalf("code=%q, want 123456", code)
 	}
-	if !strings.Contains(out.String(), "CLOUDRON_TOKEN") {
-		t.Fatal("expected message about env var in output")
+	if !strings.Contains(out.String(), "Two-factor") {
+		t.Fatal("expected 2FA prompt in output")
 	}
 }
+
+func TestAsk2FAWithIO_Empty(t *testing.T) {
+	in := strings.NewReader("\n")
+	out := new(bytes.Buffer)
+	_, err := Ask2FAWithIO(in, out)
+	if err == nil || !strings.Contains(err.Error(), "2FA code is required") {
+		t.Fatalf("expected 2FA code required error, got %v", err)
+	}
+}
+
+func TestAsk2FAWithIO_Whitespace(t *testing.T) {
+	in := strings.NewReader("  654321  \n")
+	out := new(bytes.Buffer)
+	code, err := Ask2FAWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != "654321" {
+		t.Fatalf("code should be trimmed, got %q", code)
+	}
+}
+
+// === AskSubdomain tests ===
 
 func TestAskSubdomainWithIO(t *testing.T) {
 	in := strings.NewReader("myapp\n")
@@ -198,225 +450,7 @@ func TestAskSubdomainWithIO_Invalid(t *testing.T) {
 	}
 }
 
-func TestRunWithIO_PipedInputNoTrailingNewline(t *testing.T) {
-	// Simulate piped input: printf "url\ntoken\nsub" | ./fastpack-deploy
-	in := strings.NewReader("example.com\nmy-token\nmyapp")
-	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(in, out)
-	if err != nil {
-		t.Fatalf("piped input without trailing newline should work: %v", err)
-	}
-	if cfg.Token != "my-token" {
-		t.Fatalf("token=%q", cfg.Token)
-	}
-	if cfg.Subdomain != "myapp" {
-		t.Fatalf("subdomain=%q", cfg.Subdomain)
-	}
-}
-
-func TestRunWithIO_SelfSignedFalsePositive(t *testing.T) {
-	// Production URLs containing "10." should NOT trigger TLS bypass
-	safeURLs := []string{
-		"api.v10.example.com",
-		"my.example10.com",
-		"10cloud.example.com",
-		"something.10x.io",
-	}
-	for _, u := range safeURLs {
-		t.Run(u, func(t *testing.T) {
-			in := strings.NewReader(u + "\ntoken\nsub\n")
-			out := new(bytes.Buffer)
-			cfg, err := RunWithIO(in, out)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if cfg.AllowSelfSigned {
-				t.Fatalf("AllowSelfSigned should be false for production URL %s", u)
-			}
-		})
-	}
-}
-
-// === MUTATION-KILLING TESTS ===
-// These tests are designed to catch specific mutations that would otherwise survive.
-
-func TestRunWithIO_NipIoFalsePositive(t *testing.T) {
-	// Mutation target: strings.Contains(host, ".nip.io") should NOT match
-	// domains that have ".nip.io" in the middle (e.g., evil.nip.io.attacker.com)
-	attackerURLs := []string{
-		"evil.nip.io.attacker.com",
-		"nip.io.evil.com",
-		"my.nip.io.co.uk",
-	}
-	for _, u := range attackerURLs {
-		t.Run(u, func(t *testing.T) {
-			in := strings.NewReader(u + "\ntoken\nsub\n")
-			out := new(bytes.Buffer)
-			cfg, err := RunWithIO(in, out)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if cfg.AllowSelfSigned {
-				t.Fatalf("AllowSelfSigned should be false for attacker URL %s — nip.io in middle is NOT a dev instance", u)
-			}
-		})
-	}
-}
-
-func TestRunWithIO_NipIoTruePositive(t *testing.T) {
-	// Verify legitimate nip.io subdomains still trigger
-	legit := []string{"192.168.1.50.nip.io", "10.0.0.1.nip.io", "my.app.nip.io"}
-	for _, u := range legit {
-		t.Run(u, func(t *testing.T) {
-			in := strings.NewReader(u + "\ntoken\nsub\n")
-			out := new(bytes.Buffer)
-			cfg, err := RunWithIO(in, out)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !cfg.AllowSelfSigned {
-				t.Fatalf("AllowSelfSigned should be true for legit nip.io URL %s", u)
-			}
-		})
-	}
-}
-
-func TestRunWithIO_WhitespaceTrimmingURL(t *testing.T) {
-	// Mutation target: remove TrimSpace(rawURL) → whitespace preserved in URL
-	in := strings.NewReader("  example.com  \ntoken\nsub\n")
-	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(in, out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.CloudronURL != "https://example.com" {
-		t.Fatalf("URL should be trimmed, got %q", cfg.CloudronURL)
-	}
-}
-
-func TestRunWithIO_WhitespaceTrimmingToken(t *testing.T) {
-	// Mutation target: remove TrimSpace(token) → whitespace in token
-	in := strings.NewReader("example.com\n  my-token  \nsub\n")
-	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(in, out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Token != "my-token" {
-		t.Fatalf("token should be trimmed, got %q", cfg.Token)
-	}
-}
-
-func TestRunWithIO_WhitespaceTrimmingSubdomain(t *testing.T) {
-	// Mutation target: remove TrimSpace(subdomain) → whitespace in subdomain
-	in := strings.NewReader("example.com\ntoken\n  myapp  \n")
-	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(in, out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Subdomain != "myapp" {
-		t.Fatalf("subdomain should be trimmed, got %q", cfg.Subdomain)
-	}
-}
-
-func TestRunWithIO_EOFImmediateEmpty(t *testing.T) {
-	// Mutation target: readLine EOF with len(line) > 0 changed to >= 0
-	// Empty EOF (Ctrl+D immediately) should return error, not empty string
-	in := strings.NewReader("")
-	out := new(bytes.Buffer)
-	_, err := RunWithIO(in, out)
-	if err == nil {
-		t.Fatal("empty EOF should return error, not proceed with empty input")
-	}
-}
-
-func TestRunWithIO_TokenWhitespaceOnly(t *testing.T) {
-	// Mutation target: remove TrimSpace → whitespace-only token passes validation
-	in := strings.NewReader("example.com\n   \n")
-	out := new(bytes.Buffer)
-	_, err := RunWithIO(in, out)
-	if err == nil || !strings.Contains(err.Error(), "token is required") {
-		t.Fatalf("whitespace-only token should be rejected, got %v", err)
-	}
-}
-
-func TestRunWithIO_SubdomainMaxLength(t *testing.T) {
-	// DNS subdomain label max length is 63 chars. Our regex enforces {0,61} + 2 chars = 63.
-	validMax := "a" + strings.Repeat("b", 61) + "c" // 63 chars
-	in := strings.NewReader("example.com\ntoken\n" + validMax + "\n")
-	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(in, out)
-	if err != nil {
-		t.Fatalf("63-char subdomain should be valid: %v", err)
-	}
-	if cfg.Subdomain != validMax {
-		t.Fatalf("subdomain=%q", cfg.Subdomain)
-	}
-
-	// 64 chars should be rejected
-	tooLong := validMax + "d"
-	in2 := strings.NewReader("example.com\ntoken\n" + tooLong + "\n")
-	out2 := new(bytes.Buffer)
-	_, err = RunWithIO(in2, out2)
-	if err == nil {
-		t.Fatal("64-char subdomain should be rejected")
-	}
-}
-
-func TestRunWithIO_CloudronTokenEnvWhitespace(t *testing.T) {
-	// Mutation target: CLOUDRON_TOKEN with whitespace should be used as-is
-	// (env vars are not trimmed — the user controls their environment)
-	t.Setenv("CLOUDRON_TOKEN", "  spaced-token  ")
-
-	in := strings.NewReader("example.com\nmyapp\n")
-	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(in, out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Env var tokens are used exactly as provided (spaces and all)
-	if cfg.Token != "  spaced-token  " {
-		t.Fatalf("env token should be used as-is, got %q", cfg.Token)
-	}
-}
-
-func TestRunWithIO_CloudronTokenEnvEmpty(t *testing.T) {
-	// Empty CLOUDRON_TOKEN should fall through to prompt
-	t.Setenv("CLOUDRON_TOKEN", "")
-
-	in := strings.NewReader("example.com\nmy-token\nmyapp\n")
-	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(in, out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Token != "my-token" {
-		t.Fatalf("empty env should fall through to prompt, got token=%q", cfg.Token)
-	}
-}
-
-func TestRunWithIO_LocalhostWithPort(t *testing.T) {
-	// Verify localhost:PORT is correctly detected as dev instance
-	in := strings.NewReader("localhost:3000\ntoken\nsub\n")
-	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(in, out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !cfg.AllowSelfSigned {
-		t.Fatal("localhost:3000 should trigger AllowSelfSigned")
-	}
-}
-
-func TestRunWithIO_URLWhitespaceOnly(t *testing.T) {
-	in := strings.NewReader("   \n")
-	out := new(bytes.Buffer)
-	_, err := RunWithIO(in, out)
-	if err == nil || !strings.Contains(err.Error(), "URL is required") {
-		t.Fatalf("whitespace-only URL should be rejected, got %v", err)
-	}
-}
+// === Regex tests ===
 
 func TestValidSubdomainRegex(t *testing.T) {
 	valid := []string{"a", "ab", "a1", "my-app", "app123", "a-b-c"}
@@ -434,112 +468,30 @@ func TestValidSubdomainRegex(t *testing.T) {
 	}
 }
 
-func TestRunWithIO_BuildServiceWithToken(t *testing.T) {
-	// Full flow including Build Service URL + token
-	in := strings.NewReader("example.com\ntoken\nmyapp\ndevtools.example.com\nmy-build-token\n")
+func TestRunWithIO_SubdomainMaxLength(t *testing.T) {
+	t.Setenv("CLOUDRON_TOKEN", "tok")
+
+	validMax := "a" + strings.Repeat("b", 61) + "c" // 63 chars
+	in := strings.NewReader("example.com\n" + validMax + "\n")
 	out := new(bytes.Buffer)
 	cfg, err := RunWithIO(in, out)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("63-char subdomain should be valid: %v", err)
 	}
-	if cfg.BuildServiceURL != "https://devtools.example.com" {
-		t.Fatalf("buildServiceURL=%q", cfg.BuildServiceURL)
+	if cfg.Subdomain != validMax {
+		t.Fatalf("subdomain=%q", cfg.Subdomain)
 	}
-	if cfg.BuildToken != "my-build-token" {
-		t.Fatalf("buildToken=%q", cfg.BuildToken)
-	}
-	output := out.String()
-	if !strings.Contains(output, "Step 1/4") {
-		t.Fatal("expected Step 1/4 in output")
-	}
-	if !strings.Contains(output, "Step 4/4") {
-		t.Fatal("expected Step 4/4 in output")
-	}
-}
 
-func TestRunWithIO_BuildServiceEmptyToken(t *testing.T) {
-	// Providing a Build Service URL but empty token should now error
-	in := strings.NewReader("example.com\ntoken\nmyapp\ndevtools.example.com\n\n")
-	out := new(bytes.Buffer)
-	_, err := RunWithIO(in, out)
-	if err == nil || !strings.Contains(err.Error(), "Build Service token is required") {
-		t.Fatalf("expected build token required error, got %v", err)
-	}
-}
-
-func TestRunWithIO_DynamicStepNumbers(t *testing.T) {
-	// When CLOUDRON_TOKEN is set, steps should be 1/3, 2/3, 3/3 (not 1/4)
-	t.Setenv("CLOUDRON_TOKEN", "env-tok")
-	in := strings.NewReader("example.com\nmyapp\n")
-	out := new(bytes.Buffer)
-	_, err := RunWithIO(in, out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	output := out.String()
-	if !strings.Contains(output, "Step 1/3") {
-		t.Fatalf("expected Step 1/3 when token env is set, got:\n%s", output)
-	}
-	if strings.Contains(output, "Step 1/4") {
-		t.Fatal("should not show Step 1/4 when token env is set")
-	}
-}
-
-func TestRunWithIO_BuildServiceEnvVars(t *testing.T) {
-	t.Setenv("CLOUDRON_BUILD_SERVICE_URL", "https://devtools.example.com")
-	t.Setenv("CLOUDRON_BUILD_TOKEN", "env-build-tok")
-
-	in := strings.NewReader("example.com\ntoken\nmyapp\n")
-	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(in, out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.BuildServiceURL != "https://devtools.example.com" {
-		t.Fatalf("buildServiceURL=%q", cfg.BuildServiceURL)
-	}
-	if cfg.BuildToken != "env-build-tok" {
-		t.Fatalf("buildToken=%q", cfg.BuildToken)
-	}
-	if !strings.Contains(out.String(), "environment variables") {
-		t.Fatal("expected env vars message in output")
-	}
-}
-
-func TestRunWithIO_BuildServiceEnvURL_NoToken(t *testing.T) {
-	t.Setenv("CLOUDRON_BUILD_SERVICE_URL", "https://devtools.example.com")
-	// CLOUDRON_BUILD_TOKEN is NOT set
-
-	in := strings.NewReader("example.com\ntoken\nmyapp\n")
-	out := new(bytes.Buffer)
-	_, err := RunWithIO(in, out)
-	if err == nil || !strings.Contains(err.Error(), "CLOUDRON_BUILD_TOKEN is missing") {
-		t.Fatalf("expected missing token error, got %v", err)
-	}
-	output := out.String()
-	// With both env vars set, only 3 steps (URL, Token, Subdomain)
-	if !strings.Contains(output, "Step 1/3") {
-		t.Fatalf("expected Step 1/3 with build env set, got:\n%s", output)
-	}
-}
-
-func TestRunWithIO_SubdomainHintIncludesDomain(t *testing.T) {
-	in := strings.NewReader("my.cloud.example.com\ntoken\nmyapp\n")
-	out := new(bytes.Buffer)
-	_, err := RunWithIO(in, out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	output := out.String()
-	if !strings.Contains(output, "myapp.cloud.example.com") {
-		t.Fatalf("expected domain hint in subdomain prompt, got:\n%s", output)
+	tooLong := validMax + "d"
+	in2 := strings.NewReader("example.com\n" + tooLong + "\n")
+	out2 := new(bytes.Buffer)
+	_, err = RunWithIO(in2, out2)
+	if err == nil {
+		t.Fatal("64-char subdomain should be rejected")
 	}
 }
 
 func TestMain(m *testing.M) {
-	// Clear env vars for tests that don't set them explicitly
 	os.Unsetenv("CLOUDRON_TOKEN")
-	os.Unsetenv("CLOUDRON_BUILD_SERVICE_URL")
-	os.Unsetenv("CLOUDRON_BUILD_TOKEN")
 	os.Exit(m.Run())
 }
