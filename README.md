@@ -21,11 +21,25 @@ Packaging a Docker image as a Cloudron custom app requires writing several files
 3. Pick your options (database, SSO, ports)
 4. Download the ZIP
 5. Extract and deploy:
-   ```bash
-   cloudron login my.example.com
-   cloudron build
-   cloudron install
-   ```
+
+### Option A: FastPack Deploy CLI (recommended)
+
+Download the [Go binary](deploy-cli/README.md) for your platform (Windows/macOS/Linux) and run it from the extracted folder:
+
+```bash
+./fastpack-deploy-linux-amd64
+# Wizard guides you: Cloudron URL → Token → Subdomain → Build Service → Done!
+```
+
+No Node.js, no npm, no Docker on your machine — just a single binary.
+
+### Option B: Cloudron CLI
+
+```bash
+cloudron login my.example.com
+cloudron build
+cloudron install
+```
 
 ## Features
 
@@ -39,6 +53,15 @@ Packaging a Docker image as a Cloudron custom app requires writing several files
 - **Progressive disclosure** — simple 3-click path with collapsible advanced sections
 - **Zero backend** — everything runs client-side, no data sent anywhere
 
+## Documentation
+
+- [Getting Started](docs/getting-started.md) — First package in 3 minutes
+- [Tutorial: Deploy From Scratch](docs/tutorial-deploy-from-scratch.md) — Complete beginner guide
+- [Custom App Example](docs/custom-app-example.md) — Build and deploy a Flask app
+- [Configuration Examples](docs/examples.md) — 15+ real-world setups
+- [Architecture](docs/architecture.md) — Technical deep-dive
+- [Go Deploy CLI](deploy-cli/README.md) — Zero-dependency deployer binary
+
 ## Development
 
 No build step required. Serve the directory with any static file server:
@@ -50,7 +73,21 @@ python3 -m http.server 8080
 
 Open `http://localhost:8080` in your browser.
 
-Run tests: open `http://localhost:8080/test.html` (47 unit tests).
+### Tests
+
+```bash
+# Frontend unit tests (207 assertions)
+node test-ci.mjs
+
+# Go CLI unit tests (75 tests)
+cd deploy-cli && go test ./...
+
+# Docker build tests (11 configs)
+node test-build.mjs
+
+# Full E2E (requires Cloudron VM + Build Service token)
+CLOUDRON_BUILD_TOKEN=<token> node test-go-deploy-e2e.mjs
+```
 
 ## Support
 

@@ -52,14 +52,33 @@ my-app-cloudron.zip
 # Extract the ZIP
 unzip my-app-cloudron.zip -d my-app
 cd my-app
+```
 
-# Option A: Use the deploy script (easiest)
-node deploy.js
+### Option A: FastPack Deploy CLI (recommended — no dependencies)
 
-# Option B: Manual deployment
+Download the [Go binary](../deploy-cli/README.md) for your platform, place it in the extracted folder, and run it:
+
+```bash
+./fastpack-deploy-linux-amd64     # Linux
+./fastpack-deploy-darwin-arm64    # macOS Apple Silicon
+.\fastpack-deploy-windows-amd64.exe  # Windows
+```
+
+The wizard guides you through 4 steps: Cloudron URL, API token, subdomain, and Build Service. See the [full tutorial](tutorial-deploy-from-scratch.md) for detailed instructions.
+
+### Option B: Cloudron CLI
+
+```bash
+npm install -g cloudron
 cloudron login my.cloudron.com
 cloudron build
 cloudron install
+```
+
+### Option C: Deploy script
+
+```bash
+node deploy.js
 ```
 
 ## What Happens Behind the Scenes

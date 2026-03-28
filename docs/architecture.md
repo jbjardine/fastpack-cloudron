@@ -22,16 +22,24 @@ Preview + ZIP Download
 
 ```
 fastpack-cloudron/
-├── index.html         # UI: form, CSS, ARIA tabs, progressive disclosure
-├── app.js             # Controller: form handling, validation, events, localStorage
-├── generators.js      # Model: pure functions that generate file content
-├── test.html          # 313 browser-based unit tests
-├── test-ci.mjs        # Headless test runner (Playwright)
-├── test-build.mjs     # Docker build integration tests
-├── test-cloudron.mjs  # E2E tests on real Cloudron
-├── test-e2e-full.mjs  # Exhaustive E2E (10 configs)
+├── index.html              # UI: form, CSS, ARIA tabs, progressive disclosure
+├── app.js                  # Controller: form handling, validation, events, localStorage
+├── generators.js           # Model: pure functions that generate file content
+├── test.html               # 207 browser-based unit tests
+├── test-ci.mjs             # Headless test runner (Playwright)
+├── test-build.mjs          # Docker build integration tests
+├── test-cloudron.mjs       # E2E tests on real Cloudron
+├── test-e2e-full.mjs       # Exhaustive E2E (10 configs)
+├── test-go-deploy-e2e.mjs  # Full user flow E2E (UI → ZIP → Go CLI → Deploy)
+├── deploy-cli/             # Go Deploy CLI (zero-dependency Cloudron deployer)
+│   ├── main.go             # Entry point: 7-step deploy flow
+│   ├── Makefile            # Cross-compilation for all platforms
+│   └── internal/
+│       ├── wizard/         # Interactive terminal prompts
+│       ├── api/            # Cloudron API + Build Service client
+│       └── archive/        # Strict allow-list tarball creator
 └── extras/
-    └── builder-registry/  # Combined Builder+Registry Cloudron app
+    └── builder-registry/   # Combined Docker Builder + Registry Cloudron app
 ```
 
 ## Data Flow
@@ -178,14 +186,53 @@ FastPackCloudron generates files that follow these Cloudron patterns:
 | Localstorage init | `.initialized` guard file in `/app/data/` |
 | Multi-distro support | Auto-detects apt-get, apk, dnf, and fallback |
 
+## Go Deploy CLI
+
+The Go Deploy CLI (`deploy-cli/`) is a zero-dependency binary that replaces the `cloudron` CLI for deploying FastPackCloudron-generated packages. See [deploy-cli/README.md](../deploy-cli/README.md) for full documentation.
+
+### End-to-End Flow
+
+```
+Browser (index.html)
+    ↓ downloadZip()
+ZIP file (CloudronManifest.json + Dockerfile + start.sh + ...)
+    ↓ User extracts
+Package folder + Go binary
+    ↓ ./fastpack-deploy
+Wizard (4 steps) → Cloudron API (verify) → Build Service (upload + build) → Install
+    ↓
+App running at https://myapp.your-domain.com
+```
+
+### Build Service Protocol
+
+The Cloudron Build Service uses a non-standard auth mechanism:
+- **Auth**: `?accessToken=<token>` query parameter (not Bearer headers)
+- **Upload**: `POST /api/v1/builds` with multipart form (`sourceArchive` + metadata fields)
+- **Install**: `POST /api/v1/apps` with `subdomain` + `domain` + `dockerImage` inside manifest (Cloudron v9)
+
+### builder-registry (Test Infrastructure)
+
+`extras/builder-registry/` is a custom Cloudron app that combines the Docker Builder and Docker Registry into a single app slot. Used for development and testing.
+
+```
+nginx (port 8000)
+├── /v2/*  → Docker Registry (port 5000)
+└── /*     → Build Service (port 3000, from cloudron/io.cloudron.buildservice)
+```
+
 ## Testing Pyramid
 
 ```
-Unit Tests (313)           ← test.html (generators, manifests, security)
+Unit Tests (207)           ← test.html (generators, manifests, security)
+    ↓
+Go Unit Tests (75)         ← deploy-cli go test ./... (API, wizard, archive)
     ↓
 Build Tests (11)           ← test-build.mjs (Docker builds succeed)
     ↓
-E2E Tests (10)             ← test-e2e-full.mjs (real Cloudron deploy)
+E2E Tests (20)             ← test-go-deploy-e2e.mjs (UI → ZIP → Go CLI → Deploy → HTTP 200)
+    ↓
+Full E2E (10)              ← test-e2e-full.mjs (10 configs on live Cloudron)
     ↓
 Manual E2E                 ← test-cloudron.mjs (9 configs on live Cloudron)
 ```
