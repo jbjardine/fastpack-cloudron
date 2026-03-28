@@ -146,6 +146,13 @@ func TestLogin_2FAInvalidCode(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid 2FA code")
 	}
+	// Must NOT return Err2FARequired — that would cause an infinite retry loop
+	if err == Err2FARequired {
+		t.Fatal("invalid TOTP should return auth error, not Err2FARequired")
+	}
+	if !strings.Contains(err.Error(), "invalid username or password") {
+		t.Fatalf("expected auth error, got %v", err)
+	}
 }
 
 func TestLogin_ServerError(t *testing.T) {

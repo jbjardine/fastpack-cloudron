@@ -97,9 +97,15 @@ func (c *Client) doLogin(username, password, totpToken string) error {
 	}
 
 	if resp.StatusCode == 401 {
-		// Check if 2FA is required vs invalid credentials
-		msg := string(respBody)
-		if strings.Contains(msg, "totpToken") {
+		// Parse the error to distinguish 2FA-required from invalid credentials.
+		// Cloudron returns "A totpToken must be provided" when 2FA is needed
+		// but "Invalid totpToken" when the code is wrong.
+		var apiErr struct {
+			Message string `json:"message"`
+		}
+		json.Unmarshal(respBody, &apiErr)
+		msg := apiErr.Message
+		if strings.Contains(msg, "totpToken must be provided") {
 			return Err2FARequired
 		}
 		return fmt.Errorf("invalid username or password")
@@ -188,6 +194,10 @@ func (c *Client) FindAppBySubdomain(subdomain string) (*AppInfo, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("failed to list apps (HTTP %d)", resp.StatusCode)
+	}
 
 	var result struct {
 		Apps []AppInfo `json:"apps"`
