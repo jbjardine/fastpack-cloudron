@@ -25,15 +25,23 @@ type Config struct {
 	BuildToken      string
 }
 
+// StdinReader is the buffered reader from the last Run() call.
+// Use it for subsequent interactive prompts to avoid losing piped input.
+var StdinReader *bufio.Reader
+
 // Run executes the interactive wizard using stdin/stdout.
 func Run() (*Config, error) {
-	return RunWithIO(os.Stdin, os.Stdout)
+	StdinReader = bufio.NewReader(os.Stdin)
+	return runWithReader(StdinReader, os.Stdout)
 }
 
 // RunWithIO executes the interactive wizard with injectable IO for testing.
 // Step numbering is dynamic — skipped steps (via env vars) don't leave gaps.
 func RunWithIO(r io.Reader, w io.Writer) (*Config, error) {
-	reader := bufio.NewReader(r)
+	return runWithReader(bufio.NewReader(r), w)
+}
+
+func runWithReader(reader *bufio.Reader, w io.Writer) (*Config, error) {
 	config := &Config{}
 
 	// Check env vars to determine which steps to show

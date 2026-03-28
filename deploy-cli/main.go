@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jbjardine/fastpack-cloudron/deploy-cli/internal/api"
 	"github.com/jbjardine/fastpack-cloudron/deploy-cli/internal/archive"
@@ -79,7 +80,7 @@ func main() {
 	}
 	fmt.Printf("OK (image: %s)\n", imageTag)
 
-	// Step 6: Install the app
+	// Step 6: Install or update the app
 	subdomain := config.Subdomain
 	if subdomain == "" {
 		subdomain, err = wizard.AskSubdomain()
@@ -88,18 +89,42 @@ func main() {
 		}
 	}
 
-	fmt.Printf("🚀 Installing app at %s.%s... ", subdomain, info.Domain)
-	appURL, err := client.InstallApp(manifest, imageTag, subdomain)
-	if err != nil {
-		fatal("\n❌ Install failed: %v", err)
+	// Check if app already exists at this subdomain
+	existing, _ := client.FindAppBySubdomain(subdomain)
+
+	if existing != nil {
+		// App exists — ask to update (use wizard's buffered reader for piped input compat)
+		fmt.Printf("\n⚠️  App already installed at %s.%s\n", subdomain, info.Domain)
+		fmt.Print("   Update existing app with new image? (y/n): ")
+		answer, _ := wizard.StdinReader.ReadString('\n')
+		answer = strings.TrimSpace(answer)
+		if answer != "y" && answer != "Y" {
+			fatal("Cancelled. Choose a different subdomain or update manually.")
+		}
+
+		fmt.Printf("🔄 Updating app %s.%s... ", subdomain, info.Domain)
+		if _, err = client.UpdateApp(existing.ID, manifest, imageTag); err != nil {
+			fatal("\n❌ Update failed: %v", err)
+		}
+		fmt.Println("OK")
+	} else {
+		// New install
+		fmt.Printf("🚀 Installing app at %s.%s... ", subdomain, info.Domain)
+		if _, err = client.InstallApp(manifest, imageTag, subdomain); err != nil {
+			fatal("\n❌ Install failed: %v", err)
+		}
+		fmt.Println("OK")
 	}
-	fmt.Println("OK")
 
 	// Step 7: Success!
+	action := "deployed"
+	if existing != nil {
+		action = "updated"
+	}
 	fmt.Println()
 	fmt.Println("╔══════════════════════════════════════╗")
-	fmt.Println("║          ✅ App deployed!             ║")
-	fmt.Printf("║  %s\n", appURL)
+	fmt.Printf("║          ✅ App %s!            ║\n", action)
+	fmt.Printf("║  https://%s.%s\n", subdomain, info.Domain)
 	fmt.Println("╚══════════════════════════════════════╝")
 }
 

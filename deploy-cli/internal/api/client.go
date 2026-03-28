@@ -335,7 +335,88 @@ func (c *Client) waitForBuild(buildURL, token, buildID string) (string, error) {
 	return "", fmt.Errorf("build timed out after 10 minutes")
 }
 
-// InstallApp installs an app on Cloudron using the built image.
+// AppInfo holds basic information about an installed Cloudron app.
+type AppInfo struct {
+	ID        string `json:"id"`
+	Subdomain string `json:"subdomain"`
+	Domain    string `json:"domain"`
+	FQDN      string `json:"fqdn"`
+}
+
+// FindAppBySubdomain checks if an app is already installed at the given subdomain.
+// Returns the app info if found, nil if not found.
+func (c *Client) FindAppBySubdomain(subdomain string) (*AppInfo, error) {
+	resp, err := c.get("/api/v1/apps")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Apps []AppInfo `json:"apps"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	for _, app := range result.Apps {
+		if app.Subdomain == subdomain {
+			return &app, nil
+		}
+	}
+	return nil, nil
+}
+
+// UpdateApp updates an existing app with a new image.
+// Cloudron v9 API: POST /api/v1/apps/{id}/update.
+func (c *Client) UpdateApp(appID, manifestPath, imageTag string) (string, error) {
+	manifestData, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return "", fmt.Errorf("cannot read manifest: %w", err)
+	}
+
+	var manifest map[string]any
+	if err := json.Unmarshal(manifestData, &manifest); err != nil {
+		return "", fmt.Errorf("invalid manifest JSON: %w", err)
+	}
+
+	manifest["dockerImage"] = imageTag
+
+	payload := map[string]any{
+		"appStoreId":       "",
+		"manifest":         manifest,
+		"skipBackup":       false,
+		"skipNotification": true,
+		"force":            true,
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/apps/"+appID+"/update", bytes.NewReader(payloadBytes))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("update request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 && resp.StatusCode != 202 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return "", fmt.Errorf("update failed (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	return fmt.Sprintf("https://%s (updated)", appID), nil
+}
+
+// InstallApp installs a NEW app on Cloudron using the built image.
 // Cloudron v9 API: POST /api/v1/apps with {subdomain, domain, manifest}.
 // The dockerImage goes INSIDE the manifest object, not as a separate field.
 func (c *Client) InstallApp(manifestPath, imageTag, subdomain string) (string, error) {

@@ -415,6 +415,113 @@ func TestBuildImage_ServerError500(t *testing.T) {
 
 // === InstallApp tests ===
 
+// === FindAppBySubdomain tests ===
+
+func TestFindAppBySubdomain_Found(t *testing.T) {
+	srv := cloudronMock(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.Method == "GET" && r.URL.Path == "/api/v1/apps" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"apps": []map[string]string{
+					{"id": "app-1", "subdomain": "other"},
+					{"id": "app-2", "subdomain": "myapp", "fqdn": "myapp.example.com"},
+				},
+			})
+			return true
+		}
+		return false
+	})
+	defer srv.Close()
+
+	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
+	app, err := c.FindAppBySubdomain("myapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if app == nil {
+		t.Fatal("expected to find app")
+	}
+	if app.ID != "app-2" {
+		t.Fatalf("id=%q", app.ID)
+	}
+}
+
+func TestFindAppBySubdomain_NotFound(t *testing.T) {
+	srv := cloudronMock(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.Method == "GET" && r.URL.Path == "/api/v1/apps" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"apps": []map[string]string{{"id": "app-1", "subdomain": "other"}},
+			})
+			return true
+		}
+		return false
+	})
+	defer srv.Close()
+
+	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
+	app, err := c.FindAppBySubdomain("nonexistent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if app != nil {
+		t.Fatal("expected nil for nonexistent subdomain")
+	}
+}
+
+// === UpdateApp tests ===
+
+func TestUpdateApp_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/api/v1/apps/app-123/update" {
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		var payload map[string]any
+		json.NewDecoder(r.Body).Decode(&payload)
+		m, _ := payload["manifest"].(map[string]any)
+		if m["dockerImage"] != "registry/app:v2" {
+			t.Fatalf("dockerImage=%v", m["dockerImage"])
+		}
+		if payload["force"] != true {
+			t.Fatal("expected force=true")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(202)
+		json.NewEncoder(w).Encode(map[string]string{"taskId": "42"})
+	}))
+	defer srv.Close()
+
+	tmp := t.TempDir()
+	manifest := filepath.Join(tmp, "CloudronManifest.json")
+	os.WriteFile(manifest, []byte(`{"id":"io.test.app","title":"Test","version":"2.0.0"}`), 0644)
+
+	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
+	_, err := c.UpdateApp("app-123", manifest, "registry/app:v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpdateApp_Failure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+		w.Write([]byte(`{"message":"internal error"}`))
+	}))
+	defer srv.Close()
+
+	tmp := t.TempDir()
+	manifest := filepath.Join(tmp, "CloudronManifest.json")
+	os.WriteFile(manifest, []byte(`{"id":"io.test"}`), 0644)
+
+	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
+	_, err := c.UpdateApp("app-123", manifest, "img:v1")
+	if err == nil || !strings.Contains(err.Error(), "500") {
+		t.Fatalf("expected 500 error, got %v", err)
+	}
+}
+
+// === InstallApp tests ===
+
 func TestInstallApp_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" || r.URL.Path != "/api/v1/apps" {
