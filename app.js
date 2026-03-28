@@ -901,6 +901,25 @@ export function fpApp() {
         zip.file('deploy.js', generateDeploySh());
         zip.file('deploy.cmd', generateDeployCmd());
 
+        // Include the Go Deploy CLI binary for the user's platform.
+        // Fetched from ./bin/ (same-origin, served by GitHub Pages).
+        // When the repo goes public, switch to GitHub Releases URL.
+        const binaryMap = {
+          'windows':    'fastpack-deploy-windows-amd64.exe',
+          'linux':      'fastpack-deploy-linux-amd64',
+          'macos-arm':  'fastpack-deploy-darwin-arm64',
+          'macos-intel':'fastpack-deploy-darwin-amd64',
+        };
+        const binaryName = binaryMap[this._detectedOS] || binaryMap['linux'];
+        const binaryURL = `./bin/${binaryName}`;
+        try {
+          const binaryResp = await fetch(binaryURL);
+          if (binaryResp.ok) {
+            const binaryData = await binaryResp.arrayBuffer();
+            zip.file(binaryName, binaryData);
+          }
+        } catch { /* binary download failed — user can download manually */ }
+
         const blob = await zip.generateAsync({ type: 'blob' });
         const filename = `${sanitizeImageName(config.image) || 'cloudron-app'}-cloudron.zip`;
         saveAs(blob, filename);
