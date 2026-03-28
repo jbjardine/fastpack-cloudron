@@ -648,6 +648,19 @@ export function fpApp() {
     _copyFeedback: '',
     _showDeployWizard: false,
     _zipFilename: '',
+    _detectedOS: (() => {
+      const p = (navigator.userAgentData?.platform || navigator.platform || '').toLowerCase();
+      const ua = navigator.userAgent || '';
+      if (/win/.test(p)) return 'windows';
+      if (/mac/.test(p)) return /arm|aarch64/i.test(ua) ? 'macos-arm' : 'macos-intel';
+      return 'linux';
+    })(),
+    get _deployCmd() {
+      if (this._detectedOS === 'windows') return '.\\fastpack-deploy-windows-amd64.exe';
+      if (this._detectedOS === 'macos-arm') return './fastpack-deploy-darwin-arm64';
+      if (this._detectedOS === 'macos-intel') return './fastpack-deploy-darwin-amd64';
+      return './fastpack-deploy-linux-amd64';
+    },
 
     // Guided mode checkbox states (controls progressive disclosure)
     _showDatabase: false,

@@ -58,8 +58,7 @@ func (c *Client) GetCloudronInfo() (*CloudronInfo, error) {
 		return nil, fmt.Errorf("invalid API token (HTTP 401)")
 	}
 	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("unexpected status %d from Cloudron API", resp.StatusCode)
 	}
 
 	var info CloudronInfo
@@ -105,9 +104,11 @@ func (c *Client) BuildImage(tarballPath string) (string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == 409 {
+		return "", fmt.Errorf("build conflict: another build may be in progress (HTTP 409)")
+	}
 	if resp.StatusCode != 200 && resp.StatusCode != 201 && resp.StatusCode != 202 {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("build failed (HTTP %d): %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("build failed (HTTP %d)", resp.StatusCode)
 	}
 
 	// Parse response for image tag
@@ -170,9 +171,11 @@ func (c *Client) InstallApp(manifestPath, imageTag, subdomain string) (string, e
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == 409 {
+		return "", fmt.Errorf("subdomain already in use (HTTP 409)")
+	}
 	if resp.StatusCode != 200 && resp.StatusCode != 201 && resp.StatusCode != 202 {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("install failed (HTTP %d): %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("install failed (HTTP %d)", resp.StatusCode)
 	}
 
 	// Parse response for app URL
@@ -181,7 +184,9 @@ func (c *Client) InstallApp(manifestPath, imageTag, subdomain string) (string, e
 		Location string `json:"location"`
 		FQDN     string `json:"fqdn"`
 	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Sprintf("https://%s", subdomain), nil
+	}
 
 	if result.FQDN != "" {
 		return "https://" + result.FQDN, nil

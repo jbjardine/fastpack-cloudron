@@ -8,21 +8,32 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
-// Files to include in the tarball (the Cloudron package files).
-var packageFiles = []string{
+// MaxTarballSize is the maximum uncompressed tarball size (100 MB).
+const MaxTarballSize int64 = 100 * 1024 * 1024
+
+// allowedFiles is the strict allow-list of files to include in the tarball.
+// No wildcard inclusion — only explicitly listed files are packaged.
+var allowedFiles = []string{
+	// Required
 	"CloudronManifest.json",
 	"Dockerfile",
+	// Optional Cloudron files
 	"Dockerfile.cloudron",
 	"start.sh",
 	".dockerignore",
 	"nginx.conf",
 	"icon.png",
+	// Documentation (explicit, no wildcards)
+	"DESCRIPTION.md",
+	"CHANGELOG.md",
+	"README.md",
+	// Extra config
+	"cloudron-versions.json",
 }
 
-// CreateTarball creates a .tar.gz of the package files in dir.
+// CreateTarball creates a .tar.gz of the allowed package files in dir.
 // Returns the path to the temporary tarball file.
 func CreateTarball(dir string) (string, error) {
 	tmpFile, err := os.CreateTemp("", "fastpack-deploy-*.tar.gz")
@@ -31,94 +42,80 @@ func CreateTarball(dir string) (string, error) {
 	}
 	tmpPath := tmpFile.Name()
 
+	// cleanup closes writers and removes the temp file on error.
+	cleanup := func(e error) (string, error) {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return "", e
+	}
+
 	gw := gzip.NewWriter(tmpFile)
 	tw := tar.NewWriter(gw)
 
+	var totalSize int64
 	filesAdded := 0
-	for _, name := range packageFiles {
+
+	for _, name := range allowedFiles {
 		fullPath := filepath.Join(dir, name)
 		info, err := os.Stat(fullPath)
 		if os.IsNotExist(err) {
-			continue // Optional files (nginx.conf, icon.png, Dockerfile.cloudron)
+			continue // Optional files are silently skipped
 		}
 		if err != nil {
 			tw.Close()
 			gw.Close()
-			tmpFile.Close()
-			os.Remove(tmpPath)
-			return "", fmt.Errorf("cannot stat %s: %w", name, err)
+			return cleanup(fmt.Errorf("cannot stat %s: %w", name, err))
+		}
+
+		// Enforce size limit
+		totalSize += info.Size()
+		if totalSize > MaxTarballSize {
+			tw.Close()
+			gw.Close()
+			return cleanup(fmt.Errorf("package exceeds %d MB size limit", MaxTarballSize/(1024*1024)))
 		}
 
 		header, err := tar.FileInfoHeader(info, "")
 		if err != nil {
 			tw.Close()
 			gw.Close()
-			tmpFile.Close()
-			os.Remove(tmpPath)
-			return "", fmt.Errorf("tar header error for %s: %w", name, err)
+			return cleanup(fmt.Errorf("tar header error for %s: %w", name, err))
 		}
-		// Use just the filename, not the full path
 		header.Name = name
 
 		if err := tw.WriteHeader(header); err != nil {
 			tw.Close()
 			gw.Close()
-			tmpFile.Close()
-			os.Remove(tmpPath)
-			return "", err
+			return cleanup(fmt.Errorf("write header %s: %w", name, err))
 		}
 
 		f, err := os.Open(fullPath)
 		if err != nil {
 			tw.Close()
 			gw.Close()
-			tmpFile.Close()
-			os.Remove(tmpPath)
-			return "", err
+			return cleanup(fmt.Errorf("open %s: %w", name, err))
 		}
 		if _, err := io.Copy(tw, f); err != nil {
 			f.Close()
 			tw.Close()
 			gw.Close()
-			tmpFile.Close()
-			os.Remove(tmpPath)
-			return "", err
+			return cleanup(fmt.Errorf("copy %s: %w", name, err))
 		}
 		f.Close()
 		filesAdded++
 	}
 
-	// Also include any other files that might be needed (DESCRIPTION.md, etc.)
-	entries, _ := os.ReadDir(dir)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		// Skip already-added files, the deploy binary itself, and non-package files
-		if contains(packageFiles, name) {
-			continue
-		}
-		if strings.HasSuffix(name, ".exe") || name == "deploy" || name == "deploy.cmd" || name == "deploy.js" {
-			continue
-		}
-		if strings.HasSuffix(name, ".md") || strings.HasSuffix(name, ".json") {
-			// Include markdown and JSON files (DESCRIPTION.md, CHANGELOG.md, etc.)
-			fullPath := filepath.Join(dir, name)
-			info, _ := entry.Info()
-			header, _ := tar.FileInfoHeader(info, "")
-			header.Name = name
-			tw.WriteHeader(header)
-			f, _ := os.Open(fullPath)
-			io.Copy(tw, f)
-			f.Close()
-			filesAdded++
-		}
+	if err := tw.Close(); err != nil {
+		gw.Close()
+		return cleanup(fmt.Errorf("tar close: %w", err))
 	}
-
-	tw.Close()
-	gw.Close()
-	tmpFile.Close()
+	if err := gw.Close(); err != nil {
+		return cleanup(fmt.Errorf("gzip close: %w", err))
+	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("file close: %w", err)
+	}
 
 	if filesAdded == 0 {
 		os.Remove(tmpPath)
@@ -128,11 +125,9 @@ func CreateTarball(dir string) (string, error) {
 	return tmpPath, nil
 }
 
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
+// AllowedFiles returns the list of files that will be included in the tarball.
+func AllowedFiles() []string {
+	out := make([]string, len(allowedFiles))
+	copy(out, allowedFiles)
+	return out
 }

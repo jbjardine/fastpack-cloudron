@@ -512,6 +512,10 @@
       cursor: pointer;
       color: var(--fp-primary);
     }
+    .fp-deploy-os-active {
+      outline: 2px solid var(--fp-primary);
+      font-weight: 600;
+    }
 
     /* ===== Warnings & Errors ===== */
     .fp-warning {
@@ -739,7 +743,7 @@
             <strong>Package downloaded!</strong>
             <button type="button" class="fp-deploy-wizard-close" @click="_showDeployWizard = false" aria-label="Close">&times;</button>
           </div>
-          <p class="fp-deploy-wizard-subtitle">Deploy to your Cloudron in 2 commands:</p>
+          <p class="fp-deploy-wizard-subtitle">Deploy to your Cloudron in 2 steps:</p>
           <div class="fp-deploy-wizard-steps">
             <div class="fp-deploy-wizard-step">
               <span class="fp-deploy-wizard-num">1</span>
@@ -750,17 +754,28 @@
             <div class="fp-deploy-wizard-step">
               <span class="fp-deploy-wizard-num">2</span>
               <div>
-                <div class="fp-deploy-wizard-label">Login and install</div>
-                <pre class="fp-deploy-wizard-cmd" @click="navigator.clipboard.writeText('cloudron login my.example.com\ncloudron install')">cloudron login my.example.com
-cloudron install</pre>
+                <div class="fp-deploy-wizard-label">Run the FastPack Deploy CLI</div>
+                <pre class="fp-deploy-wizard-cmd" @click="navigator.clipboard?.writeText(_deployCmd).catch(() => {})" x-text="_deployCmd"></pre>
                 <span class="fp-deploy-wizard-copy">click to copy</span>
               </div>
             </div>
           </div>
           <details class="fp-deploy-wizard-details">
-            <summary>First time? Install the Cloudron CLI</summary>
-            <pre class="fp-deploy-wizard-cmd" @click="navigator.clipboard.writeText('npm install -g cloudron')">npm install -g cloudron</pre>
-            <p style="font-size:0.8rem;color:var(--fp-text-muted);margin-top:0.5rem;">Requires <a href="https://nodejs.org" target="_blank" rel="noopener">Node.js</a>. See <a href="https://docs.cloudron.io/packaging/cli/" target="_blank" rel="noopener">Cloudron CLI docs</a>.</p>
+            <summary>Download the FastPack Deploy CLI</summary>
+            <p style="font-size:0.85rem;margin-bottom:0.5rem;">No Node.js or Docker required. Download for your platform:</p>
+            <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+              <a x-bind:class="{ 'fp-deploy-os-active': _detectedOS === 'windows' }" class="fp-deploy-wizard-cmd" style="display:inline-block;padding:0.3rem 0.8rem;cursor:pointer;text-decoration:none;" href="https://github.com/jbjardine/fastpack-cloudron/releases/latest/download/fastpack-deploy-windows-amd64.exe" target="_blank" rel="noopener">Windows (x64)</a>
+              <a x-bind:class="{ 'fp-deploy-os-active': _detectedOS === 'linux' }" class="fp-deploy-wizard-cmd" style="display:inline-block;padding:0.3rem 0.8rem;cursor:pointer;text-decoration:none;" href="https://github.com/jbjardine/fastpack-cloudron/releases/latest/download/fastpack-deploy-linux-amd64" target="_blank" rel="noopener">Linux (x64)</a>
+              <a x-bind:class="{ 'fp-deploy-os-active': _detectedOS === 'macos-arm' }" class="fp-deploy-wizard-cmd" style="display:inline-block;padding:0.3rem 0.8rem;cursor:pointer;text-decoration:none;" href="https://github.com/jbjardine/fastpack-cloudron/releases/latest/download/fastpack-deploy-darwin-arm64" target="_blank" rel="noopener">macOS (Apple Silicon)</a>
+              <a x-bind:class="{ 'fp-deploy-os-active': _detectedOS === 'macos-intel' }" class="fp-deploy-wizard-cmd" style="display:inline-block;padding:0.3rem 0.8rem;cursor:pointer;text-decoration:none;" href="https://github.com/jbjardine/fastpack-cloudron/releases/latest/download/fastpack-deploy-darwin-amd64" target="_blank" rel="noopener">macOS (Intel)</a>
+            </div>
+            <p style="font-size:0.8rem;color:var(--fp-text-muted);margin-top:0.5rem;">Place the binary in your extracted ZIP folder, then run the command above. See <a href="https://docs.cloudron.io/packaging/cli/" target="_blank" rel="noopener">Cloudron docs</a>.</p>
+          </details>
+          <details class="fp-deploy-wizard-details" style="margin-top:0.5rem;">
+            <summary>Alternative: use the official Cloudron CLI</summary>
+            <pre class="fp-deploy-wizard-cmd" @click="navigator.clipboard?.writeText('cloudron login my.example.com\ncloudron install').catch(() => {})">cloudron login my.example.com
+cloudron install</pre>
+            <p style="font-size:0.8rem;color:var(--fp-text-muted);margin-top:0.5rem;">Requires <a href="https://nodejs.org" target="_blank" rel="noopener">Node.js</a>: <code>npm install -g cloudron</code></p>
           </details>
         </div>
 
@@ -1326,7 +1341,7 @@ cloudron install</pre>
               <strong>Package downloaded!</strong>
               <button type="button" class="fp-deploy-wizard-close" @click="_showDeployWizard = false" aria-label="Close">&times;</button>
             </div>
-            <p class="fp-deploy-wizard-subtitle">Deploy to your Cloudron in 2 commands:</p>
+            <p class="fp-deploy-wizard-subtitle">Deploy to your Cloudron in 2 steps:</p>
             <div class="fp-deploy-wizard-steps">
               <div class="fp-deploy-wizard-step">
                 <span class="fp-deploy-wizard-num">1</span>
@@ -1337,17 +1352,28 @@ cloudron install</pre>
               <div class="fp-deploy-wizard-step">
                 <span class="fp-deploy-wizard-num">2</span>
                 <div>
-                  <div class="fp-deploy-wizard-label">Login and install</div>
-                  <pre class="fp-deploy-wizard-cmd" @click="navigator.clipboard.writeText('cloudron login my.example.com\ncloudron install')">cloudron login my.example.com
-cloudron install</pre>
+                  <div class="fp-deploy-wizard-label">Run the FastPack Deploy CLI</div>
+                  <pre class="fp-deploy-wizard-cmd" @click="navigator.clipboard?.writeText(_deployCmd).catch(() => {})" x-text="_deployCmd"></pre>
                   <span class="fp-deploy-wizard-copy">click to copy</span>
                 </div>
               </div>
             </div>
             <details class="fp-deploy-wizard-details">
-              <summary>First time? Install the Cloudron CLI</summary>
-              <pre class="fp-deploy-wizard-cmd" @click="navigator.clipboard.writeText('npm install -g cloudron')">npm install -g cloudron</pre>
-              <p style="font-size:0.8rem;color:var(--fp-text-muted);margin-top:0.5rem;">Requires <a href="https://nodejs.org" target="_blank" rel="noopener">Node.js</a>. See <a href="https://docs.cloudron.io/packaging/cli/" target="_blank" rel="noopener">Cloudron CLI docs</a>.</p>
+              <summary>Download the FastPack Deploy CLI</summary>
+              <p style="font-size:0.85rem;margin-bottom:0.5rem;">No Node.js or Docker required. Download for your platform:</p>
+              <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                <a x-bind:class="{ 'fp-deploy-os-active': _detectedOS === 'windows' }" class="fp-deploy-wizard-cmd" style="display:inline-block;padding:0.3rem 0.8rem;cursor:pointer;text-decoration:none;" href="https://github.com/jbjardine/fastpack-cloudron/releases/latest/download/fastpack-deploy-windows-amd64.exe" target="_blank" rel="noopener">Windows (x64)</a>
+                <a x-bind:class="{ 'fp-deploy-os-active': _detectedOS === 'linux' }" class="fp-deploy-wizard-cmd" style="display:inline-block;padding:0.3rem 0.8rem;cursor:pointer;text-decoration:none;" href="https://github.com/jbjardine/fastpack-cloudron/releases/latest/download/fastpack-deploy-linux-amd64" target="_blank" rel="noopener">Linux (x64)</a>
+                <a x-bind:class="{ 'fp-deploy-os-active': _detectedOS === 'macos-arm' }" class="fp-deploy-wizard-cmd" style="display:inline-block;padding:0.3rem 0.8rem;cursor:pointer;text-decoration:none;" href="https://github.com/jbjardine/fastpack-cloudron/releases/latest/download/fastpack-deploy-darwin-arm64" target="_blank" rel="noopener">macOS (Apple Silicon)</a>
+                <a x-bind:class="{ 'fp-deploy-os-active': _detectedOS === 'macos-intel' }" class="fp-deploy-wizard-cmd" style="display:inline-block;padding:0.3rem 0.8rem;cursor:pointer;text-decoration:none;" href="https://github.com/jbjardine/fastpack-cloudron/releases/latest/download/fastpack-deploy-darwin-amd64" target="_blank" rel="noopener">macOS (Intel)</a>
+              </div>
+              <p style="font-size:0.8rem;color:var(--fp-text-muted);margin-top:0.5rem;">Place the binary in your extracted ZIP folder, then run the command above. See <a href="https://docs.cloudron.io/packaging/cli/" target="_blank" rel="noopener">Cloudron docs</a>.</p>
+            </details>
+            <details class="fp-deploy-wizard-details" style="margin-top:0.5rem;">
+              <summary>Alternative: use the official Cloudron CLI</summary>
+              <pre class="fp-deploy-wizard-cmd" @click="navigator.clipboard?.writeText('cloudron login my.example.com\ncloudron install').catch(() => {})">cloudron login my.example.com
+cloudron install</pre>
+              <p style="font-size:0.8rem;color:var(--fp-text-muted);margin-top:0.5rem;">Requires <a href="https://nodejs.org" target="_blank" rel="noopener">Node.js</a>: <code>npm install -g cloudron</code></p>
             </details>
           </div>
 
