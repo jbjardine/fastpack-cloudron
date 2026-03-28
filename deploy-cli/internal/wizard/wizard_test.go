@@ -434,8 +434,97 @@ func TestValidSubdomainRegex(t *testing.T) {
 	}
 }
 
+func TestRunWithIO_BuildServiceWithToken(t *testing.T) {
+	// Full flow including Build Service URL + token
+	in := strings.NewReader("example.com\ntoken\nmyapp\ndevtools.example.com\nmy-build-token\n")
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BuildServiceURL != "https://devtools.example.com" {
+		t.Fatalf("buildServiceURL=%q", cfg.BuildServiceURL)
+	}
+	if cfg.BuildToken != "my-build-token" {
+		t.Fatalf("buildToken=%q", cfg.BuildToken)
+	}
+	output := out.String()
+	if !strings.Contains(output, "Step 1/4") {
+		t.Fatal("expected Step 1/4 in output")
+	}
+	if !strings.Contains(output, "Step 4/4") {
+		t.Fatal("expected Step 4/4 in output")
+	}
+}
+
+func TestRunWithIO_BuildServiceEmptyToken(t *testing.T) {
+	// Providing a Build Service URL but empty token should now error
+	in := strings.NewReader("example.com\ntoken\nmyapp\ndevtools.example.com\n\n")
+	out := new(bytes.Buffer)
+	_, err := RunWithIO(in, out)
+	if err == nil || !strings.Contains(err.Error(), "Build Service token is required") {
+		t.Fatalf("expected build token required error, got %v", err)
+	}
+}
+
+func TestRunWithIO_DynamicStepNumbers(t *testing.T) {
+	// When CLOUDRON_TOKEN is set, steps should be 1/3, 2/3, 3/3 (not 1/4)
+	t.Setenv("CLOUDRON_TOKEN", "env-tok")
+	in := strings.NewReader("example.com\nmyapp\n")
+	out := new(bytes.Buffer)
+	_, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "Step 1/3") {
+		t.Fatalf("expected Step 1/3 when token env is set, got:\n%s", output)
+	}
+	if strings.Contains(output, "Step 1/4") {
+		t.Fatal("should not show Step 1/4 when token env is set")
+	}
+}
+
+func TestRunWithIO_BuildServiceEnvVars(t *testing.T) {
+	t.Setenv("CLOUDRON_BUILD_SERVICE_URL", "https://devtools.example.com")
+	t.Setenv("CLOUDRON_BUILD_TOKEN", "env-build-tok")
+
+	in := strings.NewReader("example.com\ntoken\nmyapp\n")
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BuildServiceURL != "https://devtools.example.com" {
+		t.Fatalf("buildServiceURL=%q", cfg.BuildServiceURL)
+	}
+	if cfg.BuildToken != "env-build-tok" {
+		t.Fatalf("buildToken=%q", cfg.BuildToken)
+	}
+	output := out.String()
+	// With both env vars set, only 3 steps (URL, Token, Subdomain)
+	if !strings.Contains(output, "Step 1/3") {
+		t.Fatalf("expected Step 1/3 with build env set, got:\n%s", output)
+	}
+}
+
+func TestRunWithIO_SubdomainHintIncludesDomain(t *testing.T) {
+	in := strings.NewReader("my.cloud.example.com\ntoken\nmyapp\n")
+	out := new(bytes.Buffer)
+	_, err := RunWithIO(in, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "myapp.cloud.example.com") {
+		t.Fatalf("expected domain hint in subdomain prompt, got:\n%s", output)
+	}
+}
+
 func TestMain(m *testing.M) {
-	// Clear CLOUDRON_TOKEN for tests that don't set it explicitly
+	// Clear env vars for tests that don't set them explicitly
 	os.Unsetenv("CLOUDRON_TOKEN")
+	os.Unsetenv("CLOUDRON_BUILD_SERVICE_URL")
+	os.Unsetenv("CLOUDRON_BUILD_TOKEN")
 	os.Exit(m.Run())
 }

@@ -61,6 +61,45 @@ function ssh(command) {
   return { stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim(), status: r.status };
 }
 
+// Uninstall an app via Cloudron REST API (more reliable than cloudron CLI)
+async function uninstallAppBySubdomain(subdomain) {
+  const https = await import("node:https");
+  const agent = new https.Agent({ rejectUnauthorized: false });
+  const baseURL = CLOUDRON_URL;
+
+  // Find app by subdomain
+  const listResp = await fetch(`${baseURL}/api/v1/apps`, {
+    headers: { "Authorization": `Bearer ${API_TOKEN}` },
+    agent,
+  });
+  if (!listResp.ok) return false;
+  const { apps } = await listResp.json();
+  const app = apps.find(a => a.subdomain === subdomain || a.location === subdomain);
+  if (!app) return true; // already gone
+
+  // Uninstall
+  const unResp = await fetch(`${baseURL}/api/v1/apps/${app.id}/uninstall`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${API_TOKEN}`, "Content-Type": "application/json" },
+    body: "{}",
+    agent,
+  });
+  if (!unResp.ok) return false;
+
+  // Wait for uninstall to complete (max 30s)
+  for (let i = 0; i < 15; i++) {
+    await sleep(2000);
+    const checkResp = await fetch(`${baseURL}/api/v1/apps`, {
+      headers: { "Authorization": `Bearer ${API_TOKEN}` },
+      agent,
+    });
+    if (!checkResp.ok) continue;
+    const { apps: remaining } = await checkResp.json();
+    if (!remaining.find(a => a.id === app.id)) return true;
+  }
+  return false;
+}
+
 async function main() {
   console.log("\n\x1b[36m═══════════════════════════════════════════════════\x1b[0m");
   console.log("\x1b[36m  FastPack Deploy CLI — REAL USER FLOW E2E TEST\x1b[0m");
@@ -73,11 +112,9 @@ async function main() {
     process.exit(1);
   }
 
-  // Pre-check: uninstall any leftover from previous run
+  // Pre-check: uninstall any leftover from previous run via REST API
   console.log("\x1b[33mSetup: Cleaning up previous test app...\x1b[0m");
-  spawnSync("cloudron", ["uninstall", "--app", `${SUBDOMAIN}.${CLOUDRON_DOMAIN}`], {
-    timeout: 30_000, stdio: "ignore", shell: true,
-  });
+  await uninstallAppBySubdomain(SUBDOMAIN);
 
   // ═══════════════════════════════════════════════
   // PHASE 1: Generate ZIP from UI
@@ -162,12 +199,24 @@ async function main() {
   writeFileSync(startShPath, startSh);
 
   // Run the Go binary with piped input
-  // Input: URL, token, subdomain, build service URL, build token (each on a new line)
+  // Input: URL, token, subdomain, build service URL, build service token (each on a new line)
   const BUILD_SERVICE_URL = `devtools.${CLOUDRON_DOMAIN}`;
-  const input = `my.${CLOUDRON_DOMAIN}\n${API_TOKEN}\n${SUBDOMAIN}\n${BUILD_SERVICE_URL}\n\n`;
+  const BUILD_TOKEN = process.env.CLOUDRON_BUILD_TOKEN || "";
+  if (!BUILD_TOKEN) {
+    console.error("\x1b[31m  ⚠ CLOUDRON_BUILD_TOKEN not set!\x1b[0m");
+    console.error("  The Build Service requires its own token (separate from the Cloudron API token).");
+    console.error("  To get it:");
+    console.error(`    1. Open https://${BUILD_SERVICE_URL} in your browser`);
+    console.error("    2. Log in with your Cloudron account");
+    console.error("    3. Copy the token from the Setup page");
+    console.error("  Then run: CLOUDRON_BUILD_TOKEN=<token> node test-go-deploy-e2e.mjs\n");
+    process.exit(1);
+  }
+  const input = `my.${CLOUDRON_DOMAIN}\n${API_TOKEN}\n${SUBDOMAIN}\n${BUILD_SERVICE_URL}\n${BUILD_TOKEN}\n`;
 
   console.log(`  Running: ${basename(GO_BINARY)} in ${extractDir}`);
   console.log(`  Target: ${CLOUDRON_URL} → ${SUBDOMAIN}.${CLOUDRON_DOMAIN}`);
+  console.log(`  Build Service: ${BUILD_SERVICE_URL}`);
 
   const deployResult = spawnSync(binaryDest, [], {
     cwd: extractDir,
@@ -219,10 +268,8 @@ async function main() {
   // ═══════════════════════════════════════════════
   console.log("\n\x1b[33mPhase 5: Cleanup\x1b[0m");
 
-  const uninstallResult = spawnSync("cloudron", [
-    "uninstall", "--app", `${SUBDOMAIN}.${CLOUDRON_DOMAIN}`,
-  ], { encoding: "utf8", timeout: 60_000, shell: true });
-  assert("App uninstalled", uninstallResult.status === 0);
+  const uninstalled = await uninstallAppBySubdomain(SUBDOMAIN);
+  assert("App uninstalled", uninstalled);
 
   // Cleanup temp files
   try {

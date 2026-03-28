@@ -102,6 +102,35 @@ func (c *Client) GetCloudronInfo() (*CloudronInfo, error) {
 	return &info, nil
 }
 
+// VerifyBuildService checks connectivity and auth to the Build Service.
+// Call this before BuildImage to give early, actionable error messages.
+// The Build Service uses ?accessToken= query params (not Bearer headers).
+func (c *Client) VerifyBuildService() error {
+	if c.buildServiceURL == "" {
+		return fmt.Errorf("no Build Service configured.\n   Set it with CLOUDRON_BUILD_SERVICE_URL or enter it in the wizard")
+	}
+	if c.buildToken == "" {
+		return fmt.Errorf("no Build Service token provided.\n   Get it from the Build Service Setup page: %s\n   Or set CLOUDRON_BUILD_TOKEN env var", c.buildServiceURL)
+	}
+
+	// Use /api/v1/profile with accessToken — same endpoint the cloudron CLI uses
+	req, err := http.NewRequest("GET", c.buildServiceURL+"/api/v1/profile?accessToken="+url.QueryEscape(c.buildToken), nil)
+	if err != nil {
+		return fmt.Errorf("invalid Build Service URL: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("cannot reach Build Service at %s: %w", c.buildServiceURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		return fmt.Errorf("Build Service auth failed (HTTP %d).\n   Your Build Service token may be invalid or expired.\n   Get a new token from: %s", resp.StatusCode, c.buildServiceURL)
+	}
+	return nil
+}
+
 // BuildImage uploads a tarball to the Build Service and returns the image tag.
 // The Build Service builds the Docker image server-side — no local Docker needed.
 // It uses the separate Build Service URL (e.g., devtools.DOMAIN) with its own auth.
@@ -109,10 +138,10 @@ func (c *Client) BuildImage(tarballPath string) (string, error) {
 	buildURL := c.buildServiceURL
 	buildToken := c.buildToken
 	if buildURL == "" {
-		return "", fmt.Errorf("no Build Service configured. Set build service URL with --build-service or use CLOUDRON_BUILD_SERVICE_URL env var")
+		return "", fmt.Errorf("no Build Service configured.\n   Set it with CLOUDRON_BUILD_SERVICE_URL or enter it in the wizard")
 	}
 	if buildToken == "" {
-		buildToken = c.token // fallback to Cloudron API token
+		return "", fmt.Errorf("no Build Service token.\n   Get it from the Build Service Setup page: %s\n   Or set CLOUDRON_BUILD_TOKEN env var", buildURL)
 	}
 
 	// Open the tarball
@@ -122,10 +151,25 @@ func (c *Client) BuildImage(tarballPath string) (string, error) {
 	}
 	defer f.Close()
 
-	// Create multipart form
+	// Create multipart form matching the Cloudron Build Service API:
+	//   sourceArchive: the tarball file
+	//   dockerImageRepo: registry/image name
+	//   dockerImageTag: image tag
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
-	part, err := writer.CreateFormFile("file", filepath.Base(tarballPath))
+
+	// Add metadata fields required by the Cloudron Build Service API.
+	// The dockerImageRepo is derived from the Build Service URL (works for
+	// builder-registry combo setups). In production with a separate registry,
+	// this should be configurable.
+	u, _ := url.Parse(buildURL)
+	imageRepo := u.Host + "/fastpack-app"
+	writer.WriteField("dockerImageRepo", imageRepo)
+	writer.WriteField("dockerImageTag", "latest")
+	writer.WriteField("buildArgs", "{}")
+
+	// Add the source archive
+	part, err := writer.CreateFormFile("sourceArchive", filepath.Base(tarballPath))
 	if err != nil {
 		return "", fmt.Errorf("multipart error: %w", err)
 	}
@@ -134,12 +178,12 @@ func (c *Client) BuildImage(tarballPath string) (string, error) {
 	}
 	writer.Close()
 
-	// POST to Build Service /api/v1/builds
-	req, err := http.NewRequest("POST", buildURL+"/api/v1/builds", &buf)
+	// POST to Build Service /api/v1/builds?accessToken=...
+	// Cloudron Build Service uses accessToken query param, not Bearer headers
+	req, err := http.NewRequest("POST", buildURL+"/api/v1/builds?accessToken="+url.QueryEscape(buildToken), &buf)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+buildToken)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	resp, err := c.httpClient.Do(req)
@@ -148,11 +192,17 @@ func (c *Client) BuildImage(tarballPath string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 409 {
+	switch resp.StatusCode {
+	case 401, 403:
+		return "", fmt.Errorf("Build Service auth failed (HTTP %d).\n   Your Build Service token may be invalid or expired.\n   Get a new token from: %s", resp.StatusCode, buildURL)
+	case 409:
 		return "", fmt.Errorf("build conflict: another build may be in progress (HTTP 409)")
+	case 413:
+		return "", fmt.Errorf("package too large for Build Service (HTTP 413). Max size may be exceeded")
 	}
 	if resp.StatusCode != 200 && resp.StatusCode != 201 && resp.StatusCode != 202 {
-		return "", fmt.Errorf("build failed (HTTP %d)", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return "", fmt.Errorf("build failed (HTTP %d): %s", resp.StatusCode, string(body))
 	}
 
 	// Parse response for build ID and image tag
@@ -165,14 +215,13 @@ func (c *Client) BuildImage(tarballPath string) (string, error) {
 		return "", fmt.Errorf("invalid build response: %w", err)
 	}
 
-	// If we got a build ID, we may need to poll for completion
-	// and then push the image to the registry
+	// If the response includes an image tag directly, use it.
+	// Otherwise poll for build completion.
 	imageTag := result.Image
 	if imageTag == "" && result.Tag != "" {
 		imageTag = result.Tag
 	}
 
-	// If build returned an ID but no image, poll for completion
 	if imageTag == "" && result.ID != "" {
 		imageTag, err = c.waitForBuild(buildURL, buildToken, result.ID)
 		if err != nil {
@@ -180,26 +229,41 @@ func (c *Client) BuildImage(tarballPath string) (string, error) {
 		}
 	}
 
+	// If still no image tag, construct it from what we sent.
+	// The Cloudron Build Service doesn't always return the tag in poll responses —
+	// the official cloudron CLI constructs it from the request parameters.
 	if imageTag == "" {
-		return "", fmt.Errorf("build succeeded but no image tag returned")
+		imageTag = imageRepo + ":latest"
 	}
+
 	return imageTag, nil
 }
 
 // waitForBuild polls the Build Service until a build completes.
+// Uses exponential backoff (3s → 5s → 8s → 10s cap) and prints progress dots.
 func (c *Client) waitForBuild(buildURL, token, buildID string) (string, error) {
-	for i := 0; i < 120; i++ { // max 10 minutes (5s * 120)
-		time.Sleep(5 * time.Second)
+	interval := 3 * time.Second
+	maxInterval := 10 * time.Second
+	deadline := time.Now().Add(10 * time.Minute)
+	networkErrors := 0
 
-		req, err := http.NewRequest("GET", buildURL+"/api/v1/builds/"+buildID, nil)
+	for time.Now().Before(deadline) {
+		time.Sleep(interval)
+		fmt.Print(".")
+
+		req, err := http.NewRequest("GET", buildURL+"/api/v1/builds/"+buildID+"?accessToken="+url.QueryEscape(token), nil)
 		if err != nil {
 			return "", err
 		}
-		req.Header.Set("Authorization", "Bearer "+token)
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			continue // retry on network error
+			networkErrors++
+			if networkErrors > 5 {
+				return "", fmt.Errorf("too many network errors polling build status: %w", err)
+			}
+			interval = min(interval*3/2, maxInterval)
+			continue
 		}
 
 		var status struct {
@@ -208,8 +272,13 @@ func (c *Client) waitForBuild(buildURL, token, buildID string) (string, error) {
 			Tag    string `json:"tag"`
 			Error  string `json:"error"`
 		}
-		json.NewDecoder(resp.Body).Decode(&status)
+		if decErr := json.NewDecoder(resp.Body).Decode(&status); decErr != nil {
+			resp.Body.Close()
+			interval = min(interval*3/2, maxInterval)
+			continue
+		}
 		resp.Body.Close()
+		networkErrors = 0
 
 		switch status.Status {
 		case "success", "completed", "pushed":
@@ -217,38 +286,21 @@ func (c *Client) waitForBuild(buildURL, token, buildID string) (string, error) {
 			if tag == "" {
 				tag = status.Tag
 			}
-			if tag == "" {
-				// Push the build to the registry
-				pushReq, _ := http.NewRequest("POST", buildURL+"/api/v1/builds/"+buildID+"/push", nil)
-				pushReq.Header.Set("Authorization", "Bearer "+token)
-				pushResp, err := c.httpClient.Do(pushReq)
-				if err != nil {
-					return "", fmt.Errorf("push failed: %w", err)
-				}
-				var pushResult struct {
-					Image string `json:"image"`
-					Tag   string `json:"tag"`
-				}
-				json.NewDecoder(pushResp.Body).Decode(&pushResult)
-				pushResp.Body.Close()
-				tag = pushResult.Image
-				if tag == "" {
-					tag = pushResult.Tag
-				}
-			}
-			if tag != "" {
-				return tag, nil
-			}
-			return "", fmt.Errorf("build completed but no image tag available")
+			// Build completed — return whatever tag we have (may be empty;
+			// caller will construct it from the request parameters)
+			return tag, nil
 		case "error", "failed":
 			return "", fmt.Errorf("build failed: %s", status.Error)
 		}
-		// "building", "pending" → keep polling
+		// "building", "pending" → backoff and keep polling
+		interval = min(interval*3/2, maxInterval)
 	}
 	return "", fmt.Errorf("build timed out after 10 minutes")
 }
 
 // InstallApp installs an app on Cloudron using the built image.
+// Cloudron v9 API: POST /api/v1/apps with {subdomain, domain, manifest}.
+// The dockerImage goes INSIDE the manifest object, not as a separate field.
 func (c *Client) InstallApp(manifestPath, imageTag, subdomain string) (string, error) {
 	// Read manifest
 	manifestData, err := os.ReadFile(manifestPath)
@@ -261,13 +313,23 @@ func (c *Client) InstallApp(manifestPath, imageTag, subdomain string) (string, e
 		return "", fmt.Errorf("invalid manifest JSON: %w", err)
 	}
 
-	// Build install payload
+	// Set dockerImage inside the manifest (Cloudron v9 API requirement)
+	manifest["dockerImage"] = imageTag
+
+	// Extract domain from baseURL
+	u, _ := url.Parse(c.baseURL)
+	domain := u.Hostname()
+	if strings.HasPrefix(domain, "my.") {
+		domain = domain[3:]
+	}
+
+	// Build install payload (Cloudron v9 format)
 	payload := map[string]any{
-		"appStoreId":  "",
-		"manifest":    manifest,
-		"location":    subdomain,
+		"appStoreId":       "",
+		"manifest":         manifest,
+		"subdomain":        subdomain,
+		"domain":           domain,
 		"accessRestriction": nil,
-		"image":       imageTag,
 	}
 
 	payloadBytes, err := json.Marshal(payload)
@@ -293,7 +355,8 @@ func (c *Client) InstallApp(manifestPath, imageTag, subdomain string) (string, e
 		return "", fmt.Errorf("subdomain already in use (HTTP 409)")
 	}
 	if resp.StatusCode != 200 && resp.StatusCode != 201 && resp.StatusCode != 202 {
-		return "", fmt.Errorf("install failed (HTTP %d)", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return "", fmt.Errorf("install failed (HTTP %d): %s", resp.StatusCode, string(body))
 	}
 
 	// Parse response for app URL

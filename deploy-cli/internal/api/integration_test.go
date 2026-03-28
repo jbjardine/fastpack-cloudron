@@ -34,11 +34,12 @@ func TestFullDeploymentFlow(t *testing.T) {
 			cloudronStep++
 			var payload map[string]any
 			json.NewDecoder(r.Body).Decode(&payload)
-			if payload["location"] != "testapp" {
-				t.Fatalf("wrong subdomain: %v", payload["location"])
+			if payload["subdomain"] != "testapp" {
+				t.Fatalf("wrong subdomain: %v", payload["subdomain"])
 			}
-			if payload["image"] != "registry.test/app:build-42" {
-				t.Fatalf("wrong image: %v", payload["image"])
+			m, _ := payload["manifest"].(map[string]any)
+			if m["dockerImage"] != "registry.test/app:build-42" {
+				t.Fatalf("wrong image: %v", m["dockerImage"])
 			}
 			json.NewEncoder(w).Encode(map[string]string{"id": "app-999", "fqdn": "testapp.cloud.example.com"})
 

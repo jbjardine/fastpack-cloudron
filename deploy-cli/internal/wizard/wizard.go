@@ -31,15 +31,29 @@ func Run() (*Config, error) {
 }
 
 // RunWithIO executes the interactive wizard with injectable IO for testing.
+// Step numbering is dynamic — skipped steps (via env vars) don't leave gaps.
 func RunWithIO(r io.Reader, w io.Writer) (*Config, error) {
 	reader := bufio.NewReader(r)
 	config := &Config{}
 
-	// Check CLOUDRON_TOKEN env var first
+	// Check env vars to determine which steps to show
 	envToken := os.Getenv("CLOUDRON_TOKEN")
+	envBuildURL := os.Getenv("CLOUDRON_BUILD_SERVICE_URL")
+	envBuildToken := os.Getenv("CLOUDRON_BUILD_TOKEN")
 
-	// Cloudron URL
-	fmt.Fprintln(w, "Step 1/3: Enter your Cloudron URL")
+	// Count total interactive steps
+	totalSteps := 4 // URL + Token + Subdomain + Build Service
+	if envToken != "" {
+		totalSteps--
+	}
+	if envBuildURL != "" {
+		totalSteps--
+	}
+	step := 0
+
+	// --- Cloudron URL ---
+	step++
+	fmt.Fprintf(w, "Step %d/%d: Enter your Cloudron URL\n", step, totalSteps)
 	fmt.Fprintln(w, "   Example: https://my.example.com")
 	fmt.Fprint(w, "   URL: ")
 	rawURL, err := readLine(reader)
@@ -50,31 +64,29 @@ func RunWithIO(r io.Reader, w io.Writer) (*Config, error) {
 	if rawURL == "" {
 		return nil, fmt.Errorf("URL is required")
 	}
-	// Normalize: add https:// if missing
 	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
 		rawURL = "https://" + rawURL
 	}
-	// Remove trailing slash
 	rawURL = strings.TrimRight(rawURL, "/")
 
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Host == "" || u.Hostname() == "" {
 		return nil, fmt.Errorf("invalid URL: %s", rawURL)
 	}
-	// Reject non-HTTP schemes
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return nil, fmt.Errorf("invalid URL: %s (only http/https supported)", rawURL)
 	}
 	config.CloudronURL = u.Scheme + "://" + u.Host
 
-	// API Token — use env var if set, otherwise prompt
+	// --- API Token ---
 	if envToken != "" {
 		fmt.Fprintln(w, "\n   Using API token from CLOUDRON_TOKEN environment variable.")
 		config.Token = envToken
 	} else {
+		step++
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Step 2/3: Enter your API token")
-		fmt.Fprintln(w, "   Get it from: Cloudron Dashboard > Profile > API Access > Create Token")
+		fmt.Fprintf(w, "Step %d/%d: Enter your API token\n", step, totalSteps)
+		fmt.Fprintf(w, "   Create one at: %s/#/settings (Profile > API Access)\n", config.CloudronURL)
 		fmt.Fprint(w, "   Token: ")
 		token, err := readLine(reader)
 		if err != nil {
@@ -87,10 +99,15 @@ func RunWithIO(r io.Reader, w io.Writer) (*Config, error) {
 		config.Token = token
 	}
 
-	// Subdomain
+	// --- Subdomain ---
+	step++
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Step 3/3: Choose a subdomain for your app")
-	fmt.Fprintln(w, "   Example: myapp  (your app will be at myapp.example.com)")
+	fmt.Fprintf(w, "Step %d/%d: Choose a subdomain for your app\n", step, totalSteps)
+	domain := u.Hostname()
+	if strings.HasPrefix(domain, "my.") {
+		domain = domain[3:]
+	}
+	fmt.Fprintf(w, "   Example: myapp  (your app will be at myapp.%s)\n", domain)
 	fmt.Fprint(w, "   Subdomain: ")
 	subdomain, err := readLine(reader)
 	if err != nil {
@@ -102,22 +119,21 @@ func RunWithIO(r io.Reader, w io.Writer) (*Config, error) {
 	}
 	config.Subdomain = subdomain
 
-	// Build Service URL — check env var or prompt
-	envBuildURL := os.Getenv("CLOUDRON_BUILD_SERVICE_URL")
-	envBuildToken := os.Getenv("CLOUDRON_BUILD_TOKEN")
+	// --- Build Service ---
 	if envBuildURL != "" {
 		config.BuildServiceURL = envBuildURL
 		config.BuildToken = envBuildToken
 		fmt.Fprintln(w, "\n   Using Build Service from CLOUDRON_BUILD_SERVICE_URL environment variable.")
 	} else {
+		step++
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Step 4/4: Enter your Build Service URL (e.g., devtools.example.com)")
-		fmt.Fprintln(w, "   This is the Cloudron app that builds Docker images.")
-		fmt.Fprintln(w, "   Leave empty to skip (you'll need to build locally with Docker).")
-		fmt.Fprint(w, "   Build Service URL: ")
+		fmt.Fprintf(w, "Step %d/%d: Build Service (builds Docker images on your Cloudron)\n", step, totalSteps)
+		fmt.Fprintln(w, "   This is the Cloudron app that builds Docker images server-side.")
+		fmt.Fprintln(w, "   You need the Docker Builder app installed on your Cloudron.")
+		fmt.Fprint(w, "   Build Service URL (e.g., devtools.example.com): ")
 		buildURL, err := readLine(reader)
-		if err != nil && err.Error() != "" {
-			// EOF is ok — optional field
+		if err != nil && err != io.EOF {
+			return nil, err
 		}
 		buildURL = strings.TrimSpace(buildURL)
 		if buildURL != "" {
@@ -127,14 +143,22 @@ func RunWithIO(r io.Reader, w io.Writer) (*Config, error) {
 			buildURL = strings.TrimRight(buildURL, "/")
 			config.BuildServiceURL = buildURL
 
-			fmt.Fprint(w, "   Build Service Token (or press Enter to use Cloudron token): ")
+			fmt.Fprintln(w)
+			fmt.Fprintf(w, "   To get your Build Service token:\n")
+			fmt.Fprintf(w, "   1. Open %s in your browser\n", buildURL)
+			fmt.Fprintf(w, "   2. Log in with your Cloudron account\n")
+			fmt.Fprintf(w, "   3. Copy the token from the Setup page\n")
+			fmt.Fprint(w, "   Build Service Token: ")
 			bt, _ := readLine(reader)
 			bt = strings.TrimSpace(bt)
+			if bt == "" {
+				return nil, fmt.Errorf("Build Service token is required.\n   Get it from: %s (log in → Setup page)", buildURL)
+			}
 			config.BuildToken = bt
 		}
 	}
 
-	// Self-signed cert detection — warn explicitly
+	// Self-signed cert detection
 	if isDevInstance(rawURL) {
 		config.AllowSelfSigned = true
 		fmt.Fprintln(w, "\n   ⚠️  Dev instance detected — self-signed certificates will be accepted.")

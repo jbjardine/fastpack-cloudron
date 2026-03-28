@@ -13,7 +13,7 @@ import (
 	"github.com/jbjardine/fastpack-cloudron/deploy-cli/internal/wizard"
 )
 
-const version = "1.0.0"
+const version = "1.1.0"
 
 func main() {
 	fmt.Println("╔══════════════════════════════════════╗")
@@ -52,6 +52,15 @@ func main() {
 		fatal("\n❌ Cannot connect: %v\nCheck your URL and API token.", err)
 	}
 	fmt.Printf("OK (%s v%s)\n", info.DisplayName, info.Version)
+
+	// Step 3b: Verify Build Service connection (early auth check)
+	if config.BuildServiceURL != "" {
+		fmt.Print("🔨 Verifying Build Service... ")
+		if err := client.VerifyBuildService(); err != nil {
+			fatal("\n❌ %v", err)
+		}
+		fmt.Println("OK")
+	}
 
 	// Step 4: Create tarball from package files
 	fmt.Print("📦 Packaging files... ")
