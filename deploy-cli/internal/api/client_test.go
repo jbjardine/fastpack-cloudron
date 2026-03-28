@@ -34,11 +34,15 @@ func cloudronMock(t *testing.T, opts ...func(w http.ResponseWriter, r *http.Requ
 }
 
 // buildServiceMock returns a mock Build Service server.
+// Handles both the builds list (for auto-detect) and the build POST.
 func buildServiceMock(t *testing.T, imageTag string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case r.Method == "GET" && r.URL.Path == "/api/v1/builds":
+			// Return empty builds list (no previous builds for auto-detect)
+			json.NewEncoder(w).Encode(map[string]any{"builds": []any{}})
 		case r.Method == "POST" && r.URL.Path == "/api/v1/builds":
 			json.NewEncoder(w).Encode(map[string]string{"image": imageTag})
 		default:
@@ -126,6 +130,12 @@ func TestGetCloudronInfo_VerifiesAuthHeader(t *testing.T) {
 
 func TestBuildImage_Success(t *testing.T) {
 	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Handle auto-detect GET (returns empty builds list)
+		if r.Method == "GET" && r.URL.Path == "/api/v1/builds" {
+			json.NewEncoder(w).Encode(map[string]any{"builds": []any{}})
+			return
+		}
 		if r.Method != "POST" || r.URL.Path != "/api/v1/builds" {
 			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
 		}
@@ -144,7 +154,6 @@ func TestBuildImage_Success(t *testing.T) {
 		if r.FormValue("dockerImageRepo") == "" {
 			t.Fatal("missing dockerImageRepo field")
 		}
-		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"image": "registry.example.com/app:v1.0.0"})
 	}))
 	defer buildSrv.Close()
@@ -225,6 +234,50 @@ func TestVerifyBuildService_AuthFailure(t *testing.T) {
 	err := c.VerifyBuildService()
 	if err == nil || !strings.Contains(err.Error(), "auth failed") {
 		t.Fatalf("expected auth error, got %v", err)
+	}
+}
+
+func TestDetectImageRepo_FromPreviousBuilds(t *testing.T) {
+	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"builds": []map[string]string{
+				{"dockerImageRepo": "old-repo/app", "status": "failed"},
+				{"dockerImageRepo": "docker.io/myuser/myapp", "status": "success"},
+			},
+		})
+	}))
+	defer buildSrv.Close()
+
+	c := &Client{buildServiceURL: buildSrv.URL, buildToken: "tok", httpClient: buildSrv.Client()}
+	repo := c.detectImageRepo()
+	if repo != "docker.io/myuser/myapp" {
+		t.Fatalf("expected auto-detected repo, got %q", repo)
+	}
+}
+
+func TestDetectImageRepo_FallbackToHostname(t *testing.T) {
+	// Server returns empty builds list
+	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"builds": []any{}})
+	}))
+	defer buildSrv.Close()
+
+	c := &Client{buildServiceURL: buildSrv.URL, buildToken: "tok", httpClient: buildSrv.Client()}
+	repo := c.detectImageRepo()
+	if !strings.Contains(repo, "127.0.0.1") || !strings.Contains(repo, "/fastpack-app") {
+		t.Fatalf("expected hostname fallback, got %q", repo)
+	}
+}
+
+func TestDetectImageRepo_EnvVarOverride(t *testing.T) {
+	t.Setenv("DOCKER_IMAGE_REPO", "custom-registry.io/my-app")
+
+	c := &Client{buildServiceURL: "https://devtools.example.com", buildToken: "tok"}
+	repo := c.detectImageRepo()
+	if repo != "custom-registry.io/my-app" {
+		t.Fatalf("expected env var override, got %q", repo)
 	}
 }
 
@@ -315,11 +368,16 @@ func TestBuildImage_TagFallback(t *testing.T) {
 
 func TestBuildImage_VerifiesContentType(t *testing.T) {
 	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Handle auto-detect GET
+		if r.Method == "GET" && r.URL.Path == "/api/v1/builds" {
+			json.NewEncoder(w).Encode(map[string]any{"builds": []any{}})
+			return
+		}
 		ct := r.Header.Get("Content-Type")
 		if !strings.Contains(ct, "multipart/form-data") {
 			t.Fatalf("expected multipart/form-data, got %q", ct)
 		}
-		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"image": "img:v1"})
 	}))
 	defer buildSrv.Close()

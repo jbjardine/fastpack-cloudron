@@ -52,7 +52,14 @@ func TestFullDeploymentFlow(t *testing.T) {
 	// Mock Build Service
 	buildSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.Method == "POST" && r.URL.Path == "/api/v1/builds" {
+		if r.Method == "GET" && r.URL.Path == "/api/v1/builds" {
+			// Auto-detect: return a previous successful build
+			json.NewEncoder(w).Encode(map[string]any{
+				"builds": []map[string]string{
+					{"dockerImageRepo": "registry.test/app", "status": "success"},
+				},
+			})
+		} else if r.Method == "POST" && r.URL.Path == "/api/v1/builds" {
 			buildStep++
 			if err := r.ParseMultipartForm(10 << 20); err != nil {
 				t.Fatalf("expected multipart: %v", err)

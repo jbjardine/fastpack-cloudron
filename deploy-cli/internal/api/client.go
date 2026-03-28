@@ -134,6 +134,43 @@ func (c *Client) VerifyBuildService() error {
 	return nil
 }
 
+// detectImageRepo auto-detects the Docker image repository from previous builds.
+// Falls back to the Build Service hostname if no prior builds exist.
+func (c *Client) detectImageRepo() string {
+	// Check DOCKER_IMAGE_REPO env var first (explicit override)
+	if envRepo := os.Getenv("DOCKER_IMAGE_REPO"); envRepo != "" {
+		return envRepo
+	}
+
+	// Try to learn from previous successful builds
+	req, err := http.NewRequest("GET", c.buildServiceURL+"/api/v1/builds?accessToken="+url.QueryEscape(c.buildToken), nil)
+	if err == nil {
+		resp, err := c.httpClient.Do(req)
+		if err == nil {
+			defer resp.Body.Close()
+			var result struct {
+				Builds []struct {
+					DockerImageRepo string `json:"dockerImageRepo"`
+					Status          string `json:"status"`
+				} `json:"builds"`
+			}
+			if json.NewDecoder(resp.Body).Decode(&result) == nil {
+				// Find the last successful build's repo
+				for i := len(result.Builds) - 1; i >= 0; i-- {
+					b := result.Builds[i]
+					if b.Status == "success" && b.DockerImageRepo != "" {
+						return b.DockerImageRepo
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback: use Build Service hostname as registry (works for builder-registry combo)
+	u, _ := url.Parse(c.buildServiceURL)
+	return u.Host + "/fastpack-app"
+}
+
 // BuildImage uploads a tarball to the Build Service and returns the image tag.
 // The Build Service builds the Docker image server-side — no local Docker needed.
 // It uses the separate Build Service URL (e.g., devtools.DOMAIN) with its own auth.
@@ -146,6 +183,9 @@ func (c *Client) BuildImage(tarballPath string) (string, error) {
 	if buildToken == "" {
 		return "", fmt.Errorf("no Build Service token.\n   Get it from the Build Service Setup page: %s\n   Or set CLOUDRON_BUILD_TOKEN env var", buildURL)
 	}
+
+	// Auto-detect the Docker image repository
+	imageRepo := c.detectImageRepo()
 
 	// Open the tarball
 	f, err := os.Open(tarballPath)
@@ -161,12 +201,6 @@ func (c *Client) BuildImage(tarballPath string) (string, error) {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	// Add metadata fields required by the Cloudron Build Service API.
-	// The dockerImageRepo is derived from the Build Service URL (works for
-	// builder-registry combo setups). In production with a separate registry,
-	// this should be configurable.
-	u, _ := url.Parse(buildURL)
-	imageRepo := u.Host + "/fastpack-app"
 	writer.WriteField("dockerImageRepo", imageRepo)
 	writer.WriteField("dockerImageTag", "latest")
 	writer.WriteField("buildArgs", "{}")
