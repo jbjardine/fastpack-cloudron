@@ -56,10 +56,14 @@ func RunWithIO(r io.Reader, w io.Writer) (*Config, error) {
 	rawURL = strings.TrimRight(rawURL, "/")
 
 	u, err := url.Parse(rawURL)
-	if err != nil || u.Host == "" {
+	if err != nil || u.Host == "" || u.Hostname() == "" {
 		return nil, fmt.Errorf("invalid URL: %s", rawURL)
 	}
-	config.CloudronURL = rawURL
+	// Reject non-HTTP schemes
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("invalid URL: %s (only http/https supported)", rawURL)
+	}
+	config.CloudronURL = u.Scheme + "://" + u.Host
 
 	// API Token — use env var if set, otherwise prompt
 	if envToken != "" {
