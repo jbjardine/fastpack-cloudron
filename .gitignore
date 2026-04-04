@@ -5,3 +5,20 @@
 .idea/
 .vscode/
 .playwright-mcp/
+
+# Local agent/tool state
+.claude/
+.claude-octopus/
+
+# Local dependencies
+node_modules/
+
+# Generated test artifacts
+e2e-*.png
+
+# Generated demo outputs
+demo-package/
+fastpack-demo-package.zip
+
+# Built CLI binaries
+deploy-cli/dist/
