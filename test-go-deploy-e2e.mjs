@@ -8,15 +8,15 @@
 // 3. Download the ZIP
 // 4. Extract the ZIP
 // 5. Copy the Go deploy binary into the folder
-// 6. Run the Go binary with piped input (URL + token + subdomain)
+// 6. Run the Go binary with piped input (URL + subdomain via CLOUDRON_TOKEN)
 // 7. Verify the app is deployed and responds HTTP 200
 // 8. Cleanup (uninstall via cloudron CLI)
 //
 // Usage: node test-go-deploy-e2e.mjs
 // Requires: Playwright, cloudron CLI logged in, network access to 192.168.60.17
 
-import { spawn, spawnSync, execSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, copyFileSync, rmSync, mkdirSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, copyFileSync, rmSync } from "node:fs";
 import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -28,7 +28,10 @@ const SUBDOMAIN = "fpgo";
 const APP_URL = `https://${SUBDOMAIN}.${CLOUDRON_DOMAIN}`;
 const GO_BINARY = "deploy-cli/dist/fastpack-deploy-windows-amd64.exe";
 
-// Read token from cloudron config
+// This E2E targets a dev Cloudron with self-signed TLS.
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+// Read token from cloudron config for the legacy env-var flow.
 const cloudronConfig = JSON.parse(readFileSync(join(process.env.HOME || process.env.USERPROFILE, ".cloudron.json"), "utf8"));
 const API_TOKEN = cloudronConfig.cloudrons["my.192.168.60.17.nip.io"]?.token;
 if (!API_TOKEN) {
@@ -63,14 +66,11 @@ function ssh(command) {
 
 // Uninstall an app via Cloudron REST API (more reliable than cloudron CLI)
 async function uninstallAppBySubdomain(subdomain) {
-  const https = await import("node:https");
-  const agent = new https.Agent({ rejectUnauthorized: false });
   const baseURL = CLOUDRON_URL;
 
   // Find app by subdomain
   const listResp = await fetch(`${baseURL}/api/v1/apps`, {
     headers: { "Authorization": `Bearer ${API_TOKEN}` },
-    agent,
   });
   if (!listResp.ok) return false;
   const { apps } = await listResp.json();
@@ -82,7 +82,6 @@ async function uninstallAppBySubdomain(subdomain) {
     method: "POST",
     headers: { "Authorization": `Bearer ${API_TOKEN}`, "Content-Type": "application/json" },
     body: "{}",
-    agent,
   });
   if (!unResp.ok) return false;
 
@@ -91,7 +90,6 @@ async function uninstallAppBySubdomain(subdomain) {
     await sleep(2000);
     const checkResp = await fetch(`${baseURL}/api/v1/apps`, {
       headers: { "Authorization": `Bearer ${API_TOKEN}` },
-      agent,
     });
     if (!checkResp.ok) continue;
     const { apps: remaining } = await checkResp.json();
@@ -198,25 +196,13 @@ async function main() {
     .replace("YOUR_SERVICE_COMMAND", "python3 -m http.server 8000");
   writeFileSync(startShPath, startSh);
 
-  // Run the Go binary with piped input
-  // Input: URL, token, subdomain, build service URL, build service token (each on a new line)
-  const BUILD_SERVICE_URL = `devtools.${CLOUDRON_DOMAIN}`;
-  const BUILD_TOKEN = process.env.CLOUDRON_BUILD_TOKEN || "";
-  if (!BUILD_TOKEN) {
-    console.error("\x1b[31m  ⚠ CLOUDRON_BUILD_TOKEN not set!\x1b[0m");
-    console.error("  The Build Service requires its own token (separate from the Cloudron API token).");
-    console.error("  To get it:");
-    console.error(`    1. Open https://${BUILD_SERVICE_URL} in your browser`);
-    console.error("    2. Log in with your Cloudron account");
-    console.error("    3. Copy the token from the Setup page");
-    console.error("  Then run: CLOUDRON_BUILD_TOKEN=<token> node test-go-deploy-e2e.mjs\n");
-    process.exit(1);
-  }
-  const input = `my.${CLOUDRON_DOMAIN}\n${API_TOKEN}\n${SUBDOMAIN}\n${BUILD_SERVICE_URL}\n${BUILD_TOKEN}\n`;
+  // Run the Go binary with the backward-compatible token env var.
+  // In v2, the CLI uploads sourceArchive directly to Cloudron, so the interactive
+  // prompts are just Cloudron URL + subdomain in this flow.
+  const input = `my.${CLOUDRON_DOMAIN}\n${SUBDOMAIN}\n`;
 
   console.log(`  Running: ${basename(GO_BINARY)} in ${extractDir}`);
   console.log(`  Target: ${CLOUDRON_URL} → ${SUBDOMAIN}.${CLOUDRON_DOMAIN}`);
-  console.log(`  Build Service: ${BUILD_SERVICE_URL}`);
 
   const deployResult = spawnSync(binaryDest, [], {
     cwd: extractDir,
@@ -224,7 +210,7 @@ async function main() {
     encoding: "utf8",
     timeout: 600_000, // 10 minutes — build can be slow
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: "0" },
+    env: { ...process.env, CLOUDRON_TOKEN: API_TOKEN },
   });
 
   const stdout = deployResult.stdout || "";
@@ -241,7 +227,8 @@ async function main() {
   assert("Go CLI exited with code 0", deployResult.status === 0, `exit=${deployResult.status}`);
   assert("Go CLI detected package", stdout.includes("Package found") || stdout.includes("📦"));
   assert("Go CLI connected to Cloudron", stdout.includes("OK") && stdout.includes("Connecting"));
-  assert("Go CLI built image", stdout.includes("Building") || stdout.includes("image"));
+  assert("Go CLI packaged source archive", stdout.includes("Packaging files"));
+  assert("Go CLI used direct install flow", stdout.includes("Installing app") || stdout.includes("Updating app"));
   assert("Go CLI deployed app", stdout.includes("deployed") || stdout.includes("✅"));
 
   // ═══════════════════════════════════════════════

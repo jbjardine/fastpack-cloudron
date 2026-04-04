@@ -28,10 +28,11 @@ Download the [Go binary](deploy-cli/README.md) for your platform (Windows/macOS/
 
 ```bash
 ./fastpack-deploy-linux-amd64
-# Wizard guides you: Cloudron URL → Token → Subdomain → Build Service → Done!
+# Wizard guides you: Cloudron URL -> Username -> Password -> Subdomain -> Done!
 ```
 
-No Node.js, no npm, no Docker on your machine — just a single binary.
+No Node.js, no npm, no Docker on your machine, and no Build Service app to install on the target Cloudron — just a single binary.
+FastPack Deploy uploads the package source directly to Cloudron, which builds it server-side using its native custom app flow.
 
 ### Option B: Cloudron CLI
 
@@ -85,8 +86,8 @@ cd deploy-cli && go test ./...
 # Docker build tests (11 configs)
 node test-build.mjs
 
-# Full E2E (requires Cloudron VM + Build Service token)
-CLOUDRON_BUILD_TOKEN=<token> node test-go-deploy-e2e.mjs
+# Full E2E (requires access to a Cloudron test server)
+node test-go-deploy-e2e.mjs
 ```
 
 ## Support
