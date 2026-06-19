@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-06-19
+
+### Added
+
+- Deploy CLI configuration file support via `fastpack-deploy.json` or `FASTPACK_DEPLOY_CONFIG`.
+- Reusable deploy settings for `cloudronUrl`, `username`, `password`, `token`, `subdomain`, and `allowSelfSigned`.
+- Partial config support: the deploy wizard now prompts only for missing values.
+
+### Fixed
+
+- `CLOUDRON_TOKEN` remains the highest-priority token source for existing scripts.
+- Explicit `allowSelfSigned: false` is now honored for localhost, private IP, and `*.nip.io` Cloudron URLs.
+
 ## [1.0.0] - 2026-03-14
 
 ### Added

@@ -2,7 +2,7 @@
 
 Zero-dependency Cloudron deployer. Uploads your app directly to Cloudron via the `sourceArchive` API — no Build Service, no Docker Registry, no local Docker needed.
 
-**Version**: 2.0.0 | **Platforms**: Windows, macOS (Intel + ARM), Linux | **Binary size**: ~6 MB
+**Version**: 2.1.0 | **Platforms**: Windows, macOS (Intel + ARM), Linux | **Binary size**: ~6 MB
 
 ## Quick Start
 
@@ -73,11 +73,12 @@ You can also use an API token instead of username/password and optionally pin th
 {
   "cloudronUrl": "https://my.example.com",
   "token": "your-api-token",
-  "subdomain": "myapp"
+  "subdomain": "myapp",
+  "allowSelfSigned": false
 }
 ```
 
-The CLI only prompts for missing values, so with the file above the technician can enter just the app name/subdomain when needed. To keep credentials outside the package folder, set `FASTPACK_DEPLOY_CONFIG=/path/to/deploy.json`. `CLOUDRON_TOKEN` still overrides any token from the config file for existing scripts.
+The CLI only prompts for missing values, so with the file above the technician can enter just the app name/subdomain when needed. To keep credentials outside the package folder, set `FASTPACK_DEPLOY_CONFIG=/path/to/deploy.json`. `CLOUDRON_TOKEN` still overrides any token from the config file for existing scripts. Use `allowSelfSigned` to explicitly enable or disable self-signed certificate support for dev-looking Cloudron URLs.
 
 ## What Gets Deployed
 
@@ -134,6 +135,12 @@ deploy-cli/
 ```
 
 ## Changelog
+
+### v2.1.0
+- **Deploy config file support** via `fastpack-deploy.json` or `FASTPACK_DEPLOY_CONFIG`
+- **Reusable credentials and subdomain**: configure URL, username/password, token, subdomain, and TLS behavior
+- **Partial config prompting**: the wizard asks only for missing values
+- **Explicit TLS control**: `allowSelfSigned: false` is honored even for localhost, private IPs, and `*.nip.io`
 
 ### v2.0.0 (Breaking)
 - **Login with username/password** instead of manually copying API tokens
