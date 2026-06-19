@@ -2,7 +2,7 @@
 
 Zero-dependency Cloudron deployer. Uploads your app directly to Cloudron via the `sourceArchive` API — no Build Service, no Docker Registry, no local Docker needed.
 
-**Version**: 2.1.0 | **Platforms**: Windows, macOS (Intel + ARM), Linux | **Binary size**: ~6 MB
+**Version**: 2.1.1 | **Platforms**: Windows, macOS (Intel + ARM), Linux | **Binary size**: ~6 MB
 
 ## Quick Start
 
@@ -135,6 +135,9 @@ deploy-cli/
 ```
 
 ## Changelog
+
+### v2.1.1
+- **TLS warning fix**: explicit `allowSelfSigned: true` in deploy config now always prints the TLS verification warning
 
 ### v2.1.0
 - **Deploy config file support** via `fastpack-deploy.json` or `FASTPACK_DEPLOY_CONFIG`

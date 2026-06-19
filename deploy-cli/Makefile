@@ -2,7 +2,7 @@
 # Usage: make all (requires Go 1.22+)
 
 BINARY=fastpack-deploy
-VERSION=2.1.0
+VERSION=2.1.1
 LDFLAGS=-ldflags "-s -w -X main.version=$(VERSION)"
 
 .PHONY: all clean windows linux darwin

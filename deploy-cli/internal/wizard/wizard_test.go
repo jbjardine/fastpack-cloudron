@@ -644,6 +644,74 @@ func TestRunWithIO_FileConfigHonorsExplicitAllowSelfSignedFalseWithToken(t *test
 	}
 }
 
+func TestRunWithIO_FileConfigWarnsForExplicitAllowSelfSignedTrue(t *testing.T) {
+	dir := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWd)
+
+	configJSON := `{
+		"cloudronUrl": "example.com",
+		"username": "admin",
+		"password": "secret",
+		"allowSelfSigned": true
+	}`
+	if err := os.WriteFile("fastpack-deploy.json", []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(strings.NewReader(""), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AllowSelfSigned {
+		t.Fatal("explicit allowSelfSigned=true should disable TLS verification")
+	}
+	if !strings.Contains(out.String(), "WARNING: TLS verification is disabled") {
+		t.Fatal("expected TLS warning when self-signed certificates are explicitly enabled")
+	}
+}
+
+func TestRunWithIO_FileConfigWarnsForExplicitAllowSelfSignedTrueWithToken(t *testing.T) {
+	dir := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWd)
+
+	configJSON := `{
+		"cloudronUrl": "localhost",
+		"token": "tok",
+		"subdomain": "myapp",
+		"allowSelfSigned": true
+	}`
+	if err := os.WriteFile("fastpack-deploy.json", []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(strings.NewReader(""), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AllowSelfSigned {
+		t.Fatal("explicit allowSelfSigned=true should disable TLS verification in token flow")
+	}
+	if !strings.Contains(out.String(), "WARNING: TLS verification is disabled") {
+		t.Fatal("expected TLS warning when self-signed certificates are explicitly enabled in token flow")
+	}
+}
+
 func TestRunWithIO_CustomFileConfigPath(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + string(os.PathSeparator) + "deploy.json"

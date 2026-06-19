@@ -141,12 +141,7 @@ func runWithReader(reader *bufio.Reader, w io.Writer) (*Config, error) {
 		config.Password = password
 	}
 
-	// Self-signed cert detection
-	if isDevInstance(config.CloudronURL) && !allowSelfSignedSet {
-		config.AllowSelfSigned = true
-		fmt.Fprintln(w, "\n   ⚠️  Dev instance detected — self-signed certificates will be accepted.")
-		fmt.Fprintln(w, "   WARNING: TLS verification is disabled. Do not use this in production.")
-	}
+	applySelfSignedPolicy(config, allowSelfSignedSet, w)
 
 	fmt.Fprintln(w)
 	return config, nil
@@ -192,14 +187,20 @@ func runTokenFlow(reader *bufio.Reader, w io.Writer, config *Config, fromEnv boo
 		config.Subdomain = subdomain
 	}
 
-	if isDevInstance(config.CloudronURL) && !allowSelfSignedSet {
-		config.AllowSelfSigned = true
-		fmt.Fprintln(w, "\n   ⚠️  Dev instance detected — self-signed certificates will be accepted.")
-		fmt.Fprintln(w, "   WARNING: TLS verification is disabled. Do not use this in production.")
-	}
+	applySelfSignedPolicy(config, allowSelfSignedSet, w)
 
 	fmt.Fprintln(w)
 	return config, nil
+}
+
+func applySelfSignedPolicy(config *Config, allowSelfSignedSet bool, w io.Writer) {
+	if isDevInstance(config.CloudronURL) && !allowSelfSignedSet {
+		config.AllowSelfSigned = true
+	}
+	if config.AllowSelfSigned {
+		fmt.Fprintln(w, "\n   ⚠️  Self-signed certificates will be accepted.")
+		fmt.Fprintln(w, "   WARNING: TLS verification is disabled. Do not use this in production.")
+	}
 }
 
 // AskSubdomain prompts for a subdomain if not already provided.
