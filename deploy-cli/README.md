@@ -55,6 +55,30 @@ export CLOUDRON_TOKEN="your-api-token"
 
 When `CLOUDRON_TOKEN` is set, the CLI uses it directly as a Bearer token (legacy flow). The wizard only asks for the Cloudron URL and subdomain.
 
+### Configuration file (repeat deploys)
+
+To avoid retyping the Cloudron server and credentials for each field visit, place a `fastpack-deploy.json` file next to `CloudronManifest.json` in the extracted package folder:
+
+```json
+{
+  "cloudronUrl": "https://my.example.com",
+  "username": "admin",
+  "password": "your-password"
+}
+```
+
+You can also use an API token instead of username/password and optionally pin the app subdomain:
+
+```json
+{
+  "cloudronUrl": "https://my.example.com",
+  "token": "your-api-token",
+  "subdomain": "myapp"
+}
+```
+
+The CLI only prompts for missing values, so with the file above the technician can enter just the app name/subdomain when needed. To keep credentials outside the package folder, set `FASTPACK_DEPLOY_CONFIG=/path/to/deploy.json`. `CLOUDRON_TOKEN` still overrides any token from the config file for existing scripts.
+
 ## What Gets Deployed
 
 Only these files are packaged (strict allow-list):
