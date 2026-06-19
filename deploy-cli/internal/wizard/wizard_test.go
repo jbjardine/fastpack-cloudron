@@ -506,3 +506,159 @@ func TestMain(m *testing.M) {
 	}
 	os.Exit(m.Run())
 }
+
+func TestRunWithIO_FileConfigFullV2Flow(t *testing.T) {
+	dir := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWd)
+
+	configJSON := `{
+		"cloudronUrl": "my.example.com",
+		"username": "admin",
+		"password": "secret",
+		"subdomain": "myapp"
+	}`
+	if err := os.WriteFile("fastpack-deploy.json", []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(strings.NewReader(""), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CloudronURL != "https://my.example.com" {
+		t.Fatalf("url=%q", cfg.CloudronURL)
+	}
+	if cfg.Username != "admin" || cfg.Password != "secret" || cfg.Subdomain != "myapp" {
+		t.Fatalf("unexpected cfg: %#v", cfg)
+	}
+	if !strings.Contains(out.String(), "Using deploy config") {
+		t.Fatal("expected deploy config message")
+	}
+	if strings.Contains(out.String(), "Step 1/3") || strings.Contains(out.String(), "Step 2/3") || strings.Contains(out.String(), "Step 3/3") {
+		t.Fatal("did not expect prompts for configured fields")
+	}
+}
+
+func TestRunWithIO_FileConfigPromptsForMissingPassword(t *testing.T) {
+	dir := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWd)
+
+	configJSON := `{"cloudronUrl":"example.com","username":"admin"}`
+	if err := os.WriteFile("fastpack-deploy.json", []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(strings.NewReader("secret\n"), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Password != "secret" {
+		t.Fatalf("password=%q", cfg.Password)
+	}
+	if !strings.Contains(out.String(), "Step 3/3") {
+		t.Fatal("expected password prompt")
+	}
+}
+
+func TestRunWithIO_FileConfigHonorsExplicitAllowSelfSignedFalse(t *testing.T) {
+	dir := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWd)
+
+	configJSON := `{
+		"cloudronUrl": "localhost",
+		"username": "admin",
+		"password": "secret",
+		"allowSelfSigned": false
+	}`
+	if err := os.WriteFile("fastpack-deploy.json", []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(strings.NewReader(""), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AllowSelfSigned {
+		t.Fatal("explicit allowSelfSigned=false should keep TLS verification enabled for dev-looking URLs")
+	}
+	if strings.Contains(out.String(), "WARNING") {
+		t.Fatal("did not expect TLS warning when self-signed certificates are explicitly disabled")
+	}
+}
+
+func TestRunWithIO_FileConfigHonorsExplicitAllowSelfSignedFalseWithToken(t *testing.T) {
+	dir := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWd)
+
+	configJSON := `{
+		"cloudronUrl": "localhost",
+		"token": "tok",
+		"subdomain": "myapp",
+		"allowSelfSigned": false
+	}`
+	if err := os.WriteFile("fastpack-deploy.json", []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(strings.NewReader(""), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AllowSelfSigned {
+		t.Fatal("explicit allowSelfSigned=false should keep TLS verification enabled in token flow")
+	}
+	if strings.Contains(out.String(), "WARNING") {
+		t.Fatal("did not expect TLS warning when self-signed certificates are explicitly disabled")
+	}
+}
+
+func TestRunWithIO_CustomFileConfigPath(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + string(os.PathSeparator) + "deploy.json"
+	configJSON := `{"cloudronUrl":"example.com","token":"tok","subdomain":"myapp"}`
+	if err := os.WriteFile(path, []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FASTPACK_DEPLOY_CONFIG", path)
+
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(strings.NewReader(""), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Token != "tok" || cfg.Subdomain != "myapp" {
+		t.Fatalf("unexpected cfg: %#v", cfg)
+	}
+}

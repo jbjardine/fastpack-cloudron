@@ -15,7 +15,7 @@ import (
 	"github.com/jbjardine/fastpack-cloudron/deploy-cli/internal/wizard"
 )
 
-const version = "2.0.0"
+var version = "2.1.0"
 
 func main() {
 	if err := run(); err != nil {

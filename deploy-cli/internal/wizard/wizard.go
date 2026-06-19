@@ -3,10 +3,12 @@ package wizard
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -25,6 +27,16 @@ type Config struct {
 	AllowSelfSigned bool
 	// Token is set externally after login, or via CLOUDRON_TOKEN env var (legacy).
 	Token string
+}
+
+// FileConfig is the JSON format accepted by fastpack-deploy.json.
+type FileConfig struct {
+	CloudronURL     string `json:"cloudronUrl"`
+	Username        string `json:"username"`
+	Password        string `json:"password"`
+	Token           string `json:"token"`
+	Subdomain       string `json:"subdomain"`
+	AllowSelfSigned *bool  `json:"allowSelfSigned"`
 }
 
 // StdinReader is the buffered reader from the last Run() call.
@@ -56,61 +68,81 @@ func RunWithIO(r io.Reader, w io.Writer) (*Config, error) {
 
 func runWithReader(reader *bufio.Reader, w io.Writer) (*Config, error) {
 	config := &Config{}
-
-	// Check for legacy CLOUDRON_TOKEN env var (backward compat for scripts)
-	envToken := os.Getenv("CLOUDRON_TOKEN")
-	if envToken != "" {
-		return runLegacyFlow(reader, w, config, envToken)
+	loadedFrom, allowSelfSignedSet, err := loadFileConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	if loadedFrom != "" {
+		fmt.Fprintf(w, "   Using deploy config from %s.\n", loadedFrom)
 	}
 
-	// v2.0 flow: URL → Username → Password (3 steps)
+	// Check for legacy CLOUDRON_TOKEN env var (backward compat for scripts).
+	// Environment variables stay highest priority for existing automations.
+	envToken := os.Getenv("CLOUDRON_TOKEN")
+	if envToken != "" {
+		config.Token = envToken
+		config.Username = ""
+		config.Password = ""
+	}
+
+	if config.Token != "" {
+		return runTokenFlow(reader, w, config, loadedFrom == "" && envToken != "", allowSelfSignedSet)
+	}
+
+	// v2.0 flow: URL → Username → Password (only prompts for missing values)
 	totalSteps := 3
 
 	// --- Step 1: Cloudron URL ---
-	fmt.Fprintf(w, "Step 1/%d: Enter your Cloudron URL\n", totalSteps)
-	fmt.Fprintln(w, "   Example: https://my.example.com")
-	fmt.Fprint(w, "   URL: ")
-	rawURL, err := readLine(reader)
-	if err != nil {
-		return nil, err
-	}
-	if err := parseAndSetURL(config, rawURL); err != nil {
-		return nil, err
-	}
-
-	// --- Step 2: Username ---
-	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Step 2/%d: Enter your Cloudron username\n", totalSteps)
-	fmt.Fprint(w, "   Username: ")
-	username, err := readLine(reader)
-	if err != nil {
-		return nil, err
-	}
-	username = strings.TrimSpace(username)
-	if username == "" {
-		return nil, fmt.Errorf("username is required")
-	}
-	config.Username = username
-
-	// --- Step 3: Password ---
-	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Step 3/%d: Enter your Cloudron password\n", totalSteps)
-	fmt.Fprint(w, "   Password: ")
-	password, err := readPasswordFn()
-	if err != nil {
-		// Fallback to plain text if terminal not available (piped input)
-		password, err = readLine(reader)
+	if config.CloudronURL == "" {
+		fmt.Fprintf(w, "Step 1/%d: Enter your Cloudron URL\n", totalSteps)
+		fmt.Fprintln(w, "   Example: https://my.example.com")
+		fmt.Fprint(w, "   URL: ")
+		rawURL, err := readLine(reader)
 		if err != nil {
 			return nil, err
 		}
+		if err := parseAndSetURL(config, rawURL); err != nil {
+			return nil, err
+		}
 	}
-	if strings.TrimSpace(password) == "" {
-		return nil, fmt.Errorf("password is required")
+
+	// --- Step 2: Username ---
+	if config.Username == "" {
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "Step 2/%d: Enter your Cloudron username\n", totalSteps)
+		fmt.Fprint(w, "   Username: ")
+		username, err := readLine(reader)
+		if err != nil {
+			return nil, err
+		}
+		username = strings.TrimSpace(username)
+		if username == "" {
+			return nil, fmt.Errorf("username is required")
+		}
+		config.Username = username
 	}
-	config.Password = password
+
+	// --- Step 3: Password ---
+	if config.Password == "" {
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "Step 3/%d: Enter your Cloudron password\n", totalSteps)
+		fmt.Fprint(w, "   Password: ")
+		password, err := readPasswordFn()
+		if err != nil {
+			// Fallback to plain text if terminal not available (piped input)
+			password, err = readLine(reader)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if strings.TrimSpace(password) == "" {
+			return nil, fmt.Errorf("password is required")
+		}
+		config.Password = password
+	}
 
 	// Self-signed cert detection
-	if isDevInstance(config.CloudronURL) {
+	if isDevInstance(config.CloudronURL) && !allowSelfSignedSet {
 		config.AllowSelfSigned = true
 		fmt.Fprintln(w, "\n   ⚠️  Dev instance detected — self-signed certificates will be accepted.")
 		fmt.Fprintln(w, "   WARNING: TLS verification is disabled. Do not use this in production.")
@@ -120,42 +152,47 @@ func runWithReader(reader *bufio.Reader, w io.Writer) (*Config, error) {
 	return config, nil
 }
 
-// runLegacyFlow handles the CLOUDRON_TOKEN env var for backward compatibility.
-func runLegacyFlow(reader *bufio.Reader, w io.Writer, config *Config, token string) (*Config, error) {
-	config.Token = token
-	fmt.Fprintln(w, "   Using API token from CLOUDRON_TOKEN environment variable.")
+// runTokenFlow handles API-token deployment from the environment or config file.
+func runTokenFlow(reader *bufio.Reader, w io.Writer, config *Config, fromEnv bool, allowSelfSignedSet bool) (*Config, error) {
+	if fromEnv {
+		fmt.Fprintln(w, "   Using API token from CLOUDRON_TOKEN environment variable.")
+	}
 
 	totalSteps := 2
 
 	// --- Step 1: Cloudron URL ---
-	fmt.Fprintf(w, "\nStep 1/%d: Enter your Cloudron URL\n", totalSteps)
-	fmt.Fprintln(w, "   Example: https://my.example.com")
-	fmt.Fprint(w, "   URL: ")
-	rawURL, err := readLine(reader)
-	if err != nil {
-		return nil, err
-	}
-	if err := parseAndSetURL(config, rawURL); err != nil {
-		return nil, err
+	if config.CloudronURL == "" {
+		fmt.Fprintf(w, "\nStep 1/%d: Enter your Cloudron URL\n", totalSteps)
+		fmt.Fprintln(w, "   Example: https://my.example.com")
+		fmt.Fprint(w, "   URL: ")
+		rawURL, err := readLine(reader)
+		if err != nil {
+			return nil, err
+		}
+		if err := parseAndSetURL(config, rawURL); err != nil {
+			return nil, err
+		}
 	}
 
 	// --- Step 2: Subdomain ---
 	fmt.Fprintln(w)
 	domain := extractDomain(config.CloudronURL)
-	fmt.Fprintf(w, "Step 2/%d: Choose a subdomain for your app\n", totalSteps)
-	fmt.Fprintf(w, "   Example: myapp  (your app will be at myapp.%s)\n", domain)
-	fmt.Fprint(w, "   Subdomain: ")
-	subdomain, err := readLine(reader)
-	if err != nil {
-		return nil, err
+	if config.Subdomain == "" {
+		fmt.Fprintf(w, "Step 2/%d: Choose a subdomain for your app\n", totalSteps)
+		fmt.Fprintf(w, "   Example: myapp  (your app will be at myapp.%s)\n", domain)
+		fmt.Fprint(w, "   Subdomain: ")
+		subdomain, err := readLine(reader)
+		if err != nil {
+			return nil, err
+		}
+		subdomain = strings.TrimSpace(subdomain)
+		if subdomain != "" && !ValidSubdomain.MatchString(subdomain) {
+			return nil, fmt.Errorf("invalid subdomain %q: must contain only lowercase letters, digits, and hyphens", subdomain)
+		}
+		config.Subdomain = subdomain
 	}
-	subdomain = strings.TrimSpace(subdomain)
-	if subdomain != "" && !ValidSubdomain.MatchString(subdomain) {
-		return nil, fmt.Errorf("invalid subdomain %q: must contain only lowercase letters, digits, and hyphens", subdomain)
-	}
-	config.Subdomain = subdomain
 
-	if isDevInstance(config.CloudronURL) {
+	if isDevInstance(config.CloudronURL) && !allowSelfSignedSet {
 		config.AllowSelfSigned = true
 		fmt.Fprintln(w, "\n   ⚠️  Dev instance detected — self-signed certificates will be accepted.")
 		fmt.Fprintln(w, "   WARNING: TLS verification is disabled. Do not use this in production.")
@@ -221,6 +258,41 @@ func ask2FAWithReader(reader *bufio.Reader, w io.Writer) (string, error) {
 		return "", fmt.Errorf("2FA code is required")
 	}
 	return code, nil // TOTP codes are numeric, trimming whitespace is safe
+}
+
+func loadFileConfig(config *Config) (string, bool, error) {
+	path := strings.TrimSpace(os.Getenv("FASTPACK_DEPLOY_CONFIG"))
+	if path == "" {
+		path = "fastpack-deploy.json"
+	}
+	cleanPath := filepath.Clean(path)
+	b, err := os.ReadFile(cleanPath)
+	if err != nil {
+		if os.IsNotExist(err) && os.Getenv("FASTPACK_DEPLOY_CONFIG") == "" {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("cannot read deploy config %s: %w", cleanPath, err)
+	}
+	var fc FileConfig
+	if err := json.Unmarshal(b, &fc); err != nil {
+		return "", false, fmt.Errorf("invalid deploy config %s: %w", cleanPath, err)
+	}
+	if fc.CloudronURL != "" {
+		if err := parseAndSetURL(config, fc.CloudronURL); err != nil {
+			return "", false, fmt.Errorf("invalid cloudronUrl in %s: %w", cleanPath, err)
+		}
+	}
+	config.Username = strings.TrimSpace(fc.Username)
+	config.Password = fc.Password
+	config.Token = strings.TrimSpace(fc.Token)
+	config.Subdomain = strings.TrimSpace(fc.Subdomain)
+	if config.Subdomain != "" && !ValidSubdomain.MatchString(config.Subdomain) {
+		return "", false, fmt.Errorf("invalid subdomain %q in %s: must contain only lowercase letters, digits, and hyphens", config.Subdomain, cleanPath)
+	}
+	if fc.AllowSelfSigned != nil {
+		config.AllowSelfSigned = *fc.AllowSelfSigned
+	}
+	return cleanPath, fc.AllowSelfSigned != nil, nil
 }
 
 // parseAndSetURL validates and normalizes the Cloudron URL into config.
