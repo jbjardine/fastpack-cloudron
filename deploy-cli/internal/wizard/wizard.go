@@ -68,7 +68,7 @@ func RunWithIO(r io.Reader, w io.Writer) (*Config, error) {
 
 func runWithReader(reader *bufio.Reader, w io.Writer) (*Config, error) {
 	config := &Config{}
-	loadedFrom, err := loadFileConfig(config)
+	loadedFrom, allowSelfSignedSet, err := loadFileConfig(config)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func runWithReader(reader *bufio.Reader, w io.Writer) (*Config, error) {
 	}
 
 	if config.Token != "" {
-		return runTokenFlow(reader, w, config, loadedFrom == "" && envToken != "")
+		return runTokenFlow(reader, w, config, loadedFrom == "" && envToken != "", allowSelfSignedSet)
 	}
 
 	// v2.0 flow: URL → Username → Password (only prompts for missing values)
@@ -142,7 +142,7 @@ func runWithReader(reader *bufio.Reader, w io.Writer) (*Config, error) {
 	}
 
 	// Self-signed cert detection
-	if isDevInstance(config.CloudronURL) {
+	if isDevInstance(config.CloudronURL) && !allowSelfSignedSet {
 		config.AllowSelfSigned = true
 		fmt.Fprintln(w, "\n   ⚠️  Dev instance detected — self-signed certificates will be accepted.")
 		fmt.Fprintln(w, "   WARNING: TLS verification is disabled. Do not use this in production.")
@@ -153,7 +153,7 @@ func runWithReader(reader *bufio.Reader, w io.Writer) (*Config, error) {
 }
 
 // runTokenFlow handles API-token deployment from the environment or config file.
-func runTokenFlow(reader *bufio.Reader, w io.Writer, config *Config, fromEnv bool) (*Config, error) {
+func runTokenFlow(reader *bufio.Reader, w io.Writer, config *Config, fromEnv bool, allowSelfSignedSet bool) (*Config, error) {
 	if fromEnv {
 		fmt.Fprintln(w, "   Using API token from CLOUDRON_TOKEN environment variable.")
 	}
@@ -192,7 +192,7 @@ func runTokenFlow(reader *bufio.Reader, w io.Writer, config *Config, fromEnv boo
 		config.Subdomain = subdomain
 	}
 
-	if isDevInstance(config.CloudronURL) {
+	if isDevInstance(config.CloudronURL) && !allowSelfSignedSet {
 		config.AllowSelfSigned = true
 		fmt.Fprintln(w, "\n   ⚠️  Dev instance detected — self-signed certificates will be accepted.")
 		fmt.Fprintln(w, "   WARNING: TLS verification is disabled. Do not use this in production.")
@@ -260,7 +260,7 @@ func ask2FAWithReader(reader *bufio.Reader, w io.Writer) (string, error) {
 	return code, nil // TOTP codes are numeric, trimming whitespace is safe
 }
 
-func loadFileConfig(config *Config) (string, error) {
+func loadFileConfig(config *Config) (string, bool, error) {
 	path := strings.TrimSpace(os.Getenv("FASTPACK_DEPLOY_CONFIG"))
 	if path == "" {
 		path = "fastpack-deploy.json"
@@ -269,17 +269,17 @@ func loadFileConfig(config *Config) (string, error) {
 	b, err := os.ReadFile(cleanPath)
 	if err != nil {
 		if os.IsNotExist(err) && os.Getenv("FASTPACK_DEPLOY_CONFIG") == "" {
-			return "", nil
+			return "", false, nil
 		}
-		return "", fmt.Errorf("cannot read deploy config %s: %w", cleanPath, err)
+		return "", false, fmt.Errorf("cannot read deploy config %s: %w", cleanPath, err)
 	}
 	var fc FileConfig
 	if err := json.Unmarshal(b, &fc); err != nil {
-		return "", fmt.Errorf("invalid deploy config %s: %w", cleanPath, err)
+		return "", false, fmt.Errorf("invalid deploy config %s: %w", cleanPath, err)
 	}
 	if fc.CloudronURL != "" {
 		if err := parseAndSetURL(config, fc.CloudronURL); err != nil {
-			return "", fmt.Errorf("invalid cloudronUrl in %s: %w", cleanPath, err)
+			return "", false, fmt.Errorf("invalid cloudronUrl in %s: %w", cleanPath, err)
 		}
 	}
 	config.Username = strings.TrimSpace(fc.Username)
@@ -287,12 +287,12 @@ func loadFileConfig(config *Config) (string, error) {
 	config.Token = strings.TrimSpace(fc.Token)
 	config.Subdomain = strings.TrimSpace(fc.Subdomain)
 	if config.Subdomain != "" && !ValidSubdomain.MatchString(config.Subdomain) {
-		return "", fmt.Errorf("invalid subdomain %q in %s: must contain only lowercase letters, digits, and hyphens", config.Subdomain, cleanPath)
+		return "", false, fmt.Errorf("invalid subdomain %q in %s: must contain only lowercase letters, digits, and hyphens", config.Subdomain, cleanPath)
 	}
 	if fc.AllowSelfSigned != nil {
 		config.AllowSelfSigned = *fc.AllowSelfSigned
 	}
-	return cleanPath, nil
+	return cleanPath, fc.AllowSelfSigned != nil, nil
 }
 
 // parseAndSetURL validates and normalizes the Cloudron URL into config.

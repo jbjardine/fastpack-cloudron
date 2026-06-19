@@ -576,6 +576,74 @@ func TestRunWithIO_FileConfigPromptsForMissingPassword(t *testing.T) {
 	}
 }
 
+func TestRunWithIO_FileConfigHonorsExplicitAllowSelfSignedFalse(t *testing.T) {
+	dir := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWd)
+
+	configJSON := `{
+		"cloudronUrl": "localhost",
+		"username": "admin",
+		"password": "secret",
+		"allowSelfSigned": false
+	}`
+	if err := os.WriteFile("fastpack-deploy.json", []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(strings.NewReader(""), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AllowSelfSigned {
+		t.Fatal("explicit allowSelfSigned=false should keep TLS verification enabled for dev-looking URLs")
+	}
+	if strings.Contains(out.String(), "WARNING") {
+		t.Fatal("did not expect TLS warning when self-signed certificates are explicitly disabled")
+	}
+}
+
+func TestRunWithIO_FileConfigHonorsExplicitAllowSelfSignedFalseWithToken(t *testing.T) {
+	dir := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWd)
+
+	configJSON := `{
+		"cloudronUrl": "localhost",
+		"token": "tok",
+		"subdomain": "myapp",
+		"allowSelfSigned": false
+	}`
+	if err := os.WriteFile("fastpack-deploy.json", []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := new(bytes.Buffer)
+	cfg, err := RunWithIO(strings.NewReader(""), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AllowSelfSigned {
+		t.Fatal("explicit allowSelfSigned=false should keep TLS verification enabled in token flow")
+	}
+	if strings.Contains(out.String(), "WARNING") {
+		t.Fatal("did not expect TLS warning when self-signed certificates are explicitly disabled")
+	}
+}
+
 func TestRunWithIO_CustomFileConfigPath(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + string(os.PathSeparator) + "deploy.json"
