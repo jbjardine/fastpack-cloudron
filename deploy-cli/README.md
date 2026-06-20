@@ -1,8 +1,8 @@
 # FastPack Deploy CLI
 
-Zero-dependency Cloudron deployer. Uploads your app directly to Cloudron via the `sourceArchive` API — no Build Service, no Docker Registry, no local Docker needed.
+Zero-dependency Cloudron deployer for users. Uploads a source archive to Cloudron's custom-app install/update API — no Build Service, Docker Registry, or local Docker needed.
 
-**Version**: 2.1.1 | **Platforms**: Windows, macOS (Intel + ARM), Linux | **Binary size**: ~6 MB
+**Version**: 2.1.2 | **Platforms**: Windows, macOS (Intel + ARM), Linux | **Binary size**: ~6 MB
 
 ## Quick Start
 
@@ -34,7 +34,7 @@ Then it packages, uploads, and deploys your app automatically.
 │  1. Login (API)   │────▶│  /api/v1/auth/login    │
 │  2. Package files │     │                        │
 │  3. Upload tar.gz │────▶│  /api/v1/apps           │
-│                   │     │  (sourceArchive field)  │
+│                   │     │  (source archive)       │
 │                   │     │  4. Docker build        │
 │                   │     │  5. App running!        │
 └──────────────────┘     └───────────────────────┘
@@ -131,10 +131,14 @@ deploy-cli/
 │       ├── wizard.go            # Interactive 3-step wizard + 2FA + legacy flow
 │       └── wizard_test.go       # 33 tests including mutation-killing tests
 ├── Makefile                     # Cross-compilation targets
-└── go.mod                       # Go 1.22, zero external dependencies
+└── go.mod                       # Go 1.26.4, no runtime dependency for users
 ```
 
 ## Changelog
+
+### v2.1.2
+- **Public-readiness hardening**: rebuilds target Go 1.26.4 and updated `golang.org/x/sys`/`x/term`
+- **Release assets**: tag builds now publish binaries and SHA256 checksums to GitHub Releases
 
 ### v2.1.1
 - **TLS warning fix**: explicit `allowSelfSigned: true` in deploy config now always prints the TLS verification warning

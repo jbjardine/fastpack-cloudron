@@ -1,106 +1,71 @@
 # Getting Started
 
-Generate your first Cloudron custom app package in 3 minutes.
+Generate and deploy your first Cloudron custom app package.
 
 ## What You Need
 
-- A Docker image you want to deploy (e.g., `nginx:latest`, `ghost:5`, `n8nio/n8n`)
-- A Cloudron server ([cloudron.io](https://cloudron.io))
-- The Cloudron CLI (`npm install -g cloudron`)
+- A Docker image to package, such as `nginx:latest`, `ghost:5`, or `n8nio/n8n`
+- A Cloudron server
+- The FastPack Deploy CLI binary for your platform, or the official Cloudron CLI
 
-## Step 1: Open FastPackCloudron
+## 1. Generate the Package
 
-Go to [jbjardine.github.io/fastpack-cloudron](https://jbjardine.github.io/fastpack-cloudron/)
+1. Open [FastPackCloudron](https://jbjardine.github.io/fastpack-cloudron/).
+2. Enter a Docker image.
+3. Pick only the options you need: database, SSO, ports, storage, or stack template.
+4. Click **Download ZIP**.
 
-## Step 2: Enter Your Docker Image
+The ZIP contains:
 
-Type the image name in the "Docker Image" field. FastPackCloudron auto-generates:
-- **App ID**: `io.fastpack.nginx` (from the image name)
-- **Title**: `Nginx` (humanized image name)
-- **Version**: `1.0.0`
-
-## Step 3: Pick Your Options
-
-| Option | What It Does |
-|--------|-------------|
-| **Database** | Adds PostgreSQL, MySQL, MongoDB, or Redis as a Cloudron addon |
-| **SSO** | Adds ProxyAuth, OIDC, LDAP, OAuth, or SimpleAuth |
-| **Stack** | Pre-fills the start.sh with the right command (Node.js, PHP, Python, Java, Go) |
-| **Web Interface** | Yes = single-process app. No = background service with healthcheck |
-
-## Step 4: Download ZIP
-
-Click "Download ZIP". You get a ready-to-deploy package:
-
-```
-my-app-cloudron.zip
-├── CloudronManifest.json    # App metadata, addons, ports
-├── Dockerfile               # Container definition
-├── start.sh                 # Init script with gosu, signals
-├── .dockerignore
-├── README.md                # Deployment instructions
-├── POSTINSTALL.md           # Post-install checklist
-├── CHANGELOG.md             # Version history stub
-├── CloudronVersions.json    # For App Store publishing
-├── deploy.js                # Cross-platform deploy script
-└── deploy.cmd               # Windows launcher
+```text
+CloudronManifest.json
+Dockerfile
+start.sh
+.dockerignore
+README.md
+POSTINSTALL.md
+CHANGELOG.md
+CloudronVersions.json
 ```
 
-## Step 5: Deploy
+Review `start.sh` before deploying. Some images need a custom start command.
+
+## 2. Deploy With FastPack Deploy CLI
+
+Extract the ZIP, place the FastPack Deploy CLI binary in that folder, then run it:
 
 ```bash
-# Extract the ZIP
 unzip my-app-cloudron.zip -d my-app
 cd my-app
+./fastpack-deploy-linux-amd64
 ```
 
-### Option A: FastPack Deploy CLI (recommended — no dependencies)
+The wizard asks for:
 
-Download the [Go binary](../deploy-cli/README.md) for your platform, place it in the extracted folder, and run it:
+1. Cloudron URL
+2. Cloudron username
+3. Cloudron password, plus 2FA code if enabled
+4. App subdomain
 
-```bash
-./fastpack-deploy-linux-amd64     # Linux
-./fastpack-deploy-darwin-arm64    # macOS Apple Silicon
-.\fastpack-deploy-windows-amd64.exe  # Windows
-```
+The CLI uploads a source archive to Cloudron. No local Docker, Docker Registry, or Build Service is required.
 
-The wizard guides you through 4 steps: Cloudron URL, API token, subdomain, and Build Service. See the [full tutorial](tutorial-deploy-from-scratch.md) for detailed instructions.
-
-### Option B: Cloudron CLI
+## 3. Alternative: Cloudron CLI
 
 ```bash
 npm install -g cloudron
-cloudron login my.cloudron.com
+cloudron login my.example.com
 cloudron build
 cloudron install
 ```
 
-### Option C: Deploy script
+Use this path when you want full manual control over the Cloudron build/install flow.
 
-```bash
-node deploy.js
-```
+## Development Cloudrons
 
-## What Happens Behind the Scenes
-
-1. **Dockerfile** wraps your image with Cloudron conventions:
-   - Creates a `cloudron` user (uid 808) for non-root execution
-   - Installs `gosu` (or `su-exec` on Alpine) for privilege dropping
-   - Sets up signal handling for graceful shutdowns
-
-2. **start.sh** initializes the app:
-   - Creates `/app/data/.initialized` guard file (prevents re-init on updates)
-   - Runs `chown` on localstorage directory
-   - Executes your app via `gosu cloudron:cloudron`
-
-3. **CloudronManifest.json** tells Cloudron:
-   - Which port to expose
-   - Which addons to provision (database, SSO, etc.)
-   - Health check path
-   - Memory limits
+For self-signed development instances, set `allowSelfSigned` in `fastpack-deploy.json`. Keep TLS verification enabled for production.
 
 ## Next Steps
 
-- See [Configuration Examples](examples.md) for real-world setups
-- Read about [DooD Mode](dood-guide.md) for multi-image apps
-- Check the [Architecture Guide](architecture.md) for deep technical details
+- [Configuration Examples](examples.md)
+- [Custom App Example](custom-app-example.md)
+- [Architecture](architecture.md)

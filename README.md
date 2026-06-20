@@ -1,6 +1,6 @@
 # FastPackCloudron
 
-Generate ready-to-deploy [Cloudron](https://cloudron.io) custom app packages in 3 clicks.
+Generate [Cloudron](https://cloudron.io) custom app packages from Docker images in a few clicks.
 
 **[Try it live](https://jbjardine.github.io/fastpack-cloudron/)**
 
@@ -14,6 +14,8 @@ Packaging a Docker image as a Cloudron custom app requires writing several files
 - `.dockerignore`
 - `README.md` — deployment instructions
 
+For some images, you may still need to review the generated `start.sh` command before deployment.
+
 ## Usage
 
 1. Open [FastPackCloudron](https://jbjardine.github.io/fastpack-cloudron/)
@@ -24,7 +26,7 @@ Packaging a Docker image as a Cloudron custom app requires writing several files
 
 ### Option A: FastPack Deploy CLI (recommended)
 
-Download the [Go binary](deploy-cli/README.md) for your platform (Windows/macOS/Linux) and run it from the extracted folder:
+Download the [latest FastPack Deploy CLI binary](https://github.com/jbjardine/fastpack-cloudron/releases/latest) for your platform and run it from the extracted folder:
 
 ```bash
 ./fastpack-deploy-linux-amd64
@@ -41,6 +43,8 @@ cloudron login my.example.com
 cloudron build
 cloudron install
 ```
+
+Use `allowSelfSigned` only for development Cloudrons with self-signed certificates. Do not disable TLS verification in production.
 
 ## Features
 
@@ -77,14 +81,18 @@ Open `http://localhost:8080` in your browser.
 ### Tests
 
 ```bash
-# Frontend unit tests (207 assertions)
-node test-ci.mjs
+# Install test dependencies first
+npm ci
+npx playwright install chromium
 
-# Go CLI unit tests (75 tests)
-cd deploy-cli && go test ./...
+# Frontend unit tests
+npm test
 
-# Docker build tests (11 configs)
-node test-build.mjs
+# Go CLI unit tests
+npm run test:go
+
+# Docker build tests
+npm run test:build
 
 # Full E2E (requires access to a Cloudron test server)
 node test-go-deploy-e2e.mjs

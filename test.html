@@ -33,8 +33,6 @@
       generateReadme,
       generateCloudronVersions,
       generateNginxConf,
-      generateDeploySh,
-      generateDeployCmd,
       generatePostInstall,
       generateChangelog,
       SAFE_DOCKER_REF,
@@ -823,6 +821,7 @@
     assertIncludes("has CHANGELOG.md", dockerignore, "CHANGELOG.md");
     assertIncludes("has node_modules/", dockerignore, "node_modules/");
     assertIncludes("has .claude/", dockerignore, ".claude/");
+    assertIncludes("excludes local deploy config", dockerignore, "fastpack-deploy.json");
 
     // ========================================
     // generateReadme
@@ -844,9 +843,9 @@
     assertNotIncludes("no --image in deploy section", deploySection, "cloudron install --image");
     assertIncludes("non-root caveat", readme, "non-root");
     assertIncludes("logging guidance", readme, "stdout/stderr");
-    assertIncludes("alternative build methods section", readme, "Alternative Build Methods");
+    assertIncludes("fastpack deploy cli section", readme, "FastPack Deploy CLI");
     assertIncludes("local docker build", readme, "docker build");
-    assertIncludes("build service link", readme, "Docker Builder");
+    assertNotIncludes("no build service primary path", readme, "Docker Builder");
     assertNotIncludes("web: no TCP-only note", readme, "TCP-only mode");
 
     // TCP mode README
@@ -1089,27 +1088,6 @@
     assert("copyFrom: before mkdir", copyIdx < mkdirIdx, true);
 
     // ========================================
-    // generateDeploySh
-    // ========================================
-    addSuite("generateDeploySh");
-
-    const deployScript = generateDeploySh();
-    assertIncludes("deploy: node shebang", deployScript, "#!/usr/bin/env node");
-    assertIncludes("deploy: checks cloudron CLI", deployScript, '"cloudron", ["--version"]');
-    assertIncludes("deploy: checks login", deployScript, '"cloudron", ["list"]');
-    assertIncludes("deploy: checks Build Service", deployScript, '"cloudron", ["build", "info"]');
-    assertIncludes("deploy: npm install hint", deployScript, "npm install -g cloudron");
-    assertIncludes("deploy: cloudron login hint", deployScript, "cloudron login");
-    assertIncludes("deploy: build login hint", deployScript, "cloudron build login");
-    assertIncludes("deploy: cloudron build with repo", deployScript, '"cloudron", ["build", "--repository", repo]');
-    assertIncludes("deploy: cloudron install", deployScript, '"cloudron", ["install"]');
-    assertIncludes("deploy: cloudron update", deployScript, '"cloudron", ["update"');
-    assertIncludes("deploy: update uses --app with arg", deployScript, '"--app", appDomain');
-    assertIncludes("deploy: saves config", deployScript, ".deploy-config.json");
-    assertIncludes("deploy: asks for registry", deployScript, "Docker repository URL");
-    assertIncludes("deploy: shows examples", deployScript, "registry.yourdomain.com");
-
-    // ========================================
     // generateReadme — pre-flight checks
     // ========================================
     addSuite("generateReadme — pre-flight checks");
@@ -1118,18 +1096,6 @@
     assertIncludes("readme: pre-flight section", preflightReadme, "Pre-flight Checks");
     assertIncludes("readme: id cloudron check", preflightReadme, "id cloudron");
     assertIncludes("readme: gosu whoami check", preflightReadme, "gosu cloudron:cloudron whoami");
-
-    // ========================================
-    // generateDeployCmd
-    // ========================================
-    addSuite("generateDeployCmd");
-
-    const deployCmd = generateDeployCmd();
-    assertIncludes("deployCmd: @echo off", deployCmd, "@echo off");
-    assertIncludes("deployCmd: calls node", deployCmd, "node");
-    assertIncludes("deployCmd: references deploy.js", deployCmd, "deploy.js");
-    assertIncludes("deployCmd: passes args", deployCmd, "%*");
-    assertIncludes("deployCmd: pause", deployCmd, "pause");
 
     // ========================================
     // Input safety regex patterns
@@ -1372,7 +1338,7 @@
     assertIncludes("readme: CLOUDRON_MYSQL_URL", mysqlReadme, "CLOUDRON_MYSQL_URL");
 
     const oidcReadme = generateReadme({ ...safeConfig, sso: "oidc" });
-    assertIncludes("readme: CLOUDRON_OIDC_IDENTIFIER", oidcReadme, "CLOUDRON_OIDC_IDENTIFIER");
+    assertIncludes("readme: CLOUDRON_OIDC_CLIENT_ID", oidcReadme, "CLOUDRON_OIDC_CLIENT_ID");
 
     const ldapReadme = generateReadme({ ...safeConfig, sso: "ldap" });
     assertIncludes("readme: CLOUDRON_LDAP_URL", ldapReadme, "CLOUDRON_LDAP_URL");
@@ -1422,6 +1388,21 @@
     assertIncludes("dood: nginx routes /n8n/", doodNginx, "location /n8n/");
     assertIncludes("dood: nginx routes /api/", doodNginx, "location /api/");
     assertIncludes("dood: nginx has websocket upgrade", doodNginx, "Upgrade");
+    assertThrows("dood: rejects shell injection in volume", () =>
+      generateStartSh({
+        ...doodConfig,
+        subcontainers: [{ image: "nginx:latest", port: 80, route: "/", memory: 256, volume: "/data;touch" }],
+      }));
+    assertThrows("dood: rejects nginx injection in route", () =>
+      generateNginxConf({
+        ...doodConfig,
+        subcontainers: [{ image: "nginx:latest", port: 80, route: "/api;return 200", memory: 256, volume: "/data" }],
+      }));
+    assertThrows("dood: rejects unsafe upstream port", () =>
+      generateNginxConf({
+        ...doodConfig,
+        subcontainers: [{ image: "nginx:latest", port: 70000, route: "/", memory: 256, volume: "/data" }],
+      }));
 
     // manifest has docker addon
     const doodManifest = JSON.parse(generateManifest(doodConfig));

@@ -1,8 +1,8 @@
 # Cross-compile FastPack Deploy CLI for all platforms
-# Usage: make all (requires Go 1.22+)
+# Usage: make all (requires Go 1.26.4+)
 
 BINARY=fastpack-deploy
-VERSION=2.1.1
+VERSION=2.1.2
 LDFLAGS=-ldflags "-s -w -X main.version=$(VERSION)"
 
 .PHONY: all clean windows linux darwin

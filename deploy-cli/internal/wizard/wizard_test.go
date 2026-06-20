@@ -49,7 +49,7 @@ func TestRunWithIO_URLNormalization(t *testing.T) {
 	}{
 		{"example.com", "https://example.com"},
 		{"https://example.com", "https://example.com"},
-		{"http://example.com", "http://example.com"},
+		{"http://localhost:3000", "http://localhost:3000"},
 		{"example.com/", "https://example.com"},
 		{"https://my.cloud.com///", "https://my.cloud.com"},
 	}
@@ -65,6 +65,15 @@ func TestRunWithIO_URLNormalization(t *testing.T) {
 				t.Fatalf("url=%q, want %q", cfg.CloudronURL, tt.want)
 			}
 		})
+	}
+}
+
+func TestRunWithIO_RejectsInsecureHTTPForRemoteHost(t *testing.T) {
+	in := strings.NewReader("http://example.com\nuser\npass\n")
+	out := new(bytes.Buffer)
+	_, err := RunWithIO(in, out)
+	if err == nil || !strings.Contains(err.Error(), "insecure HTTP") {
+		t.Fatalf("expected insecure HTTP error, got %v", err)
 	}
 }
 

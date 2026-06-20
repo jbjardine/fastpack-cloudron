@@ -11,8 +11,6 @@ import {
   generateReadme,
   generateCloudronVersions,
   generateNginxConf,
-  generateDeploySh,
-  generateDeployCmd,
   generatePostInstall,
   generateChangelog,
   SAFE_DOCKER_REF,
@@ -369,6 +367,31 @@ function validate(config) {
       }
       if (svc.routePath && !SAFE_ROUTE_PATH.test(svc.routePath)) {
         errors.push({ field: 'services', message: `Invalid route path "${svc.routePath}". Must start with /.` });
+        break;
+      }
+    }
+  }
+
+  if (config.subcontainers && config.subcontainers.length > 0) {
+    for (const sub of config.subcontainers) {
+      if (sub.image && !SAFE_DOCKER_REF.test(sub.image)) {
+        errors.push({ field: 'subcontainers', message: `Invalid sub-container image "${sub.image}".` });
+        break;
+      }
+      if (!Number.isInteger(sub.port) || sub.port < 1 || sub.port > 65535) {
+        errors.push({ field: 'subcontainers', message: `Invalid sub-container port "${sub.port}".` });
+        break;
+      }
+      if (sub.route && !SAFE_ROUTE_PATH.test(sub.route)) {
+        errors.push({ field: 'subcontainers', message: `Invalid sub-container route "${sub.route}". Must start with /.` });
+        break;
+      }
+      if (!Number.isInteger(sub.memory) || sub.memory < 16 || sub.memory > 262144) {
+        errors.push({ field: 'subcontainers', message: `Invalid sub-container memory "${sub.memory}".` });
+        break;
+      }
+      if (sub.volume && !SAFE_PATH.test(sub.volume)) {
+        errors.push({ field: 'subcontainers', message: `Invalid sub-container volume "${sub.volume}".` });
         break;
       }
     }
@@ -898,27 +921,6 @@ export function fpApp() {
 
         zip.file('POSTINSTALL.md', generatePostInstall(config));
         zip.file('CHANGELOG.md', generateChangelog(config));
-        zip.file('deploy.js', generateDeploySh());
-        zip.file('deploy.cmd', generateDeployCmd());
-
-        // Include the Go Deploy CLI binary for the user's platform.
-        // Fetched from ./bin/ (same-origin, served by GitHub Pages).
-        // When the repo goes public, switch to GitHub Releases URL.
-        const binaryMap = {
-          'windows':    'fastpack-deploy-windows-amd64.exe',
-          'linux':      'fastpack-deploy-linux-amd64',
-          'macos-arm':  'fastpack-deploy-darwin-arm64',
-          'macos-intel':'fastpack-deploy-darwin-amd64',
-        };
-        const binaryName = binaryMap[this._detectedOS] || binaryMap['linux'];
-        const binaryURL = `./bin/${binaryName}`;
-        try {
-          const binaryResp = await fetch(binaryURL);
-          if (binaryResp.ok) {
-            const binaryData = await binaryResp.arrayBuffer();
-            zip.file(binaryName, binaryData);
-          }
-        } catch { /* binary download failed — user can download manually */ }
 
         const blob = await zip.generateAsync({ type: 'blob' });
         const filename = `${sanitizeImageName(config.image) || 'cloudron-app'}-cloudron.zip`;

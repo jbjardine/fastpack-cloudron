@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -314,8 +315,19 @@ func parseAndSetURL(config *Config, rawURL string) error {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("invalid URL: %s (only http/https supported)", rawURL)
 	}
+	if u.Scheme == "http" && !isLoopbackHost(u.Hostname()) {
+		return fmt.Errorf("insecure HTTP is only supported for localhost; use https for Cloudron URLs")
+	}
 	config.CloudronURL = u.Scheme + "://" + u.Host
 	return nil
+}
+
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // extractDomain returns the bare domain from a Cloudron URL (strips "my." prefix).

@@ -13,8 +13,17 @@
 # Local dependencies
 node_modules/
 
+# Local deploy credentials
+.env
+.env.*
+!.env.example
+fastpack-deploy.json
+.deploy-config.json
+
 # Generated test artifacts
 e2e-*.png
+test-results/
+build-test-output/
 
 # Generated demo outputs
 demo-package/

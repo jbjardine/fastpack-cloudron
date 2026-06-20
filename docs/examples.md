@@ -100,7 +100,7 @@ exec /usr/local/bin/gosu cloudron:cloudron node /app/code/server.js
 }
 ```
 
-**Environment variables**: `CLOUDRON_OIDC_IDENTIFIER`, `CLOUDRON_OIDC_SECRET`, `CLOUDRON_OIDC_ISSUER`
+**Environment variables**: `CLOUDRON_OIDC_CLIENT_ID`, `CLOUDRON_OIDC_CLIENT_SECRET`, `CLOUDRON_OIDC_ISSUER`
 
 **start.sh**: `exec /usr/local/bin/gosu cloudron:cloudron python3 /app/code/app.py`
 

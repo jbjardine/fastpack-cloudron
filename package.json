@@ -1,5 +1,14 @@
 {
-  "dependencies": {
+  "name": "fastpack-cloudron",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "node test-ci.mjs",
+    "test:build": "node test-build.mjs --checks",
+    "test:go": "cd deploy-cli && go test ./..."
+  },
+  "devDependencies": {
     "playwright": "^1.58.2"
   }
 }

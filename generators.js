@@ -42,10 +42,26 @@ function assertSafePort(value, context) {
   }
 }
 
+function assertSafeInteger(value, context, min, max) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < min || n > max) {
+    throw new Error(`Unsafe integer in ${context}: ${JSON.stringify(value)}`);
+  }
+}
+
 function assertSafeRoutePath(value, context) {
   if (!value || !SAFE_ROUTE_PATH.test(value)) {
     throw new Error(`Unsafe route path in ${context}: ${JSON.stringify(value)}`);
   }
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 // Cloudron constants
@@ -520,6 +536,7 @@ export function generateStartSh(config) {
     lines.push("# Forward signals to children and cleanup sub-containers on exit");
     lines.push("cleanup() {");
     for (const sub of config.subcontainers) {
+      assertSafeDockerRef(sub.image, "DooD cleanup image");
       const name = "fp-" + sub.image.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-");
       lines.push(`  docker stop ${name} 2>/dev/null`);
       lines.push(`  docker rm ${name} 2>/dev/null`);
@@ -533,6 +550,8 @@ export function generateStartSh(config) {
     for (const sub of config.subcontainers) {
       const name = "fp-" + sub.image.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-");
       assertSafeDockerRef(sub.image, "DooD sub-container image");
+      assertSafeInteger(sub.memory || 256, "DooD sub-container memory", 16, 262144);
+      assertSafePath(sub.volume || "/data", "DooD sub-container volume");
       lines.push(`# Launch ${sub.image} as sub-container`);
       lines.push(`docker rm -f ${name} 2>/dev/null || true`);
       lines.push(`docker run -d --name ${name} \\`);
@@ -550,6 +569,7 @@ export function generateStartSh(config) {
     // Discover IPs and render nginx config
     lines.push("# Discover sub-container IPs on the cloudron network");
     for (const sub of config.subcontainers) {
+      assertSafeDockerRef(sub.image, "DooD inspect image");
       const name = "fp-" + sub.image.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-");
       const varName = name.replace(/-/g, "_").toUpperCase() + "_IP";
       lines.push(`${varName}=$(docker inspect ${name} --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')`);
@@ -561,6 +581,7 @@ export function generateStartSh(config) {
     lines.push("# Render nginx config with discovered IPs");
     let sedCmd = "sed";
     for (const sub of config.subcontainers) {
+      assertSafeDockerRef(sub.image, "DooD nginx template image");
       const name = "fp-" + sub.image.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-");
       const varName = name.replace(/-/g, "_").toUpperCase() + "_IP";
       const placeholder = name.toUpperCase().replace(/-/g, "_") + "_IP";
@@ -652,6 +673,8 @@ export function generateDockerignore() {
     "LICENSE",
     ".claude/",
     "node_modules/",
+    "fastpack-deploy.json",
+    ".deploy-config.json",
   ].join("\n") + "\n";
 }
 
@@ -667,6 +690,21 @@ export function generateReadme(config) {
   lines.push("");
   lines.push("## Deployment");
   lines.push("");
+  lines.push("### FastPack Deploy CLI");
+  lines.push("");
+  lines.push("Run the bundled binary from this extracted package folder:");
+  lines.push("");
+  lines.push("```bash");
+  lines.push("./fastpack-deploy-linux-amd64     # Linux");
+  lines.push("./fastpack-deploy-darwin-arm64    # macOS Apple Silicon");
+  lines.push("./fastpack-deploy-darwin-amd64    # macOS Intel");
+  lines.push(".\\fastpack-deploy-windows-amd64.exe  # Windows");
+  lines.push("```");
+  lines.push("");
+  lines.push("The wizard asks for your Cloudron URL, username, password, and app subdomain.");
+  lines.push("");
+  lines.push("### Cloudron CLI");
+  lines.push("");
   lines.push("```bash");
   lines.push("cloudron login");
   lines.push("cloudron build");
@@ -680,19 +718,12 @@ export function generateReadme(config) {
   lines.push("cloudron update --app <app-id>");
   lines.push("```");
   lines.push("");
-  lines.push("## Alternative Build Methods");
-  lines.push("");
-  lines.push("### Local Docker build");
+  lines.push("## Local Docker Build");
   lines.push("");
   lines.push("```bash");
   lines.push("docker build -t your-image-name .");
   lines.push("cloudron install --image your-image-name");
   lines.push("```");
-  lines.push("");
-  lines.push("### Cloudron Build Service");
-  lines.push("");
-  lines.push("Push your package source to a Git repository and use the");
-  lines.push("Cloudron [Docker Builder](https://docs.cloudron.io/packaging/tutorial/#build-service) app.");
   lines.push("");
   lines.push("## Pre-flight Checks");
   lines.push("");
@@ -723,8 +754,8 @@ export function generateReadme(config) {
   if (config.database === "mongodb") envVars.push("- `CLOUDRON_MONGODB_URL` — MongoDB connection string");
   if (config.database === "redis") envVars.push("- `CLOUDRON_REDIS_URL` — Redis connection URL");
   if (config.sso === "oidc") {
-    envVars.push("- `CLOUDRON_OIDC_IDENTIFIER` — OIDC client ID");
-    envVars.push("- `CLOUDRON_OIDC_SECRET` — OIDC client secret");
+    envVars.push("- `CLOUDRON_OIDC_CLIENT_ID` — OIDC client ID");
+    envVars.push("- `CLOUDRON_OIDC_CLIENT_SECRET` — OIDC client secret");
     envVars.push("- `CLOUDRON_OIDC_ISSUER` — OIDC issuer URL");
   }
   if (config.sso === "ldap") {
@@ -752,133 +783,6 @@ export function generateReadme(config) {
   }
 
   return lines.join("\n") + "\n";
-}
-
-/**
- * Generates deploy.js — cross-platform deploy script (Windows + Linux + Mac).
- * Uses Node.js (always available since cloudron CLI requires it).
- * Checks prerequisites (CLI, login, Build Service) then builds and installs/updates.
- * Note: execSync is safe here — all commands are hardcoded strings, no user input interpolation.
- * The only dynamic value (appDomain) is passed as a separate argument via execFileSync.
- */
-export function generateDeploySh() {
-  return `#!/usr/bin/env node
-"use strict";
-var spawnSync = require("child_process").spawnSync;
-var fs = require("fs");
-var path = require("path");
-var readline = require("readline");
-
-// shell:true needed on Windows where npm globals are .cmd scripts
-var opts = { shell: true };
-var configFile = path.join(__dirname, ".deploy-config.json");
-
-function run(cmd, args) {
-  console.log("  > " + cmd + " " + args.join(" "));
-  var r = spawnSync(cmd, args, Object.assign({ stdio: "inherit" }, opts));
-  if (r.status !== 0) process.exit(r.status || 1);
-}
-
-function check(cmd, args) {
-  var r = spawnSync(cmd, args, Object.assign({ stdio: "ignore" }, opts));
-  return r.status === 0;
-}
-
-function loadConfig() {
-  try { return JSON.parse(fs.readFileSync(configFile, "utf8")); } catch(e) { return {}; }
-}
-
-function saveConfig(cfg) {
-  fs.writeFileSync(configFile, JSON.stringify(cfg, null, 2));
-}
-
-function ask(question) {
-  return new Promise(function(resolve) {
-    var rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(question, function(answer) { rl.close(); resolve(answer.trim()); });
-  });
-}
-
-async function main() {
-  console.log("=== FastPackCloudron Deploy ===\\n");
-
-  // 1. Check cloudron CLI
-  if (!check("cloudron", ["--version"])) {
-    console.error("Error: cloudron CLI not found.\\nInstall it with: npm install -g cloudron");
-    process.exit(1);
-  }
-
-  // 2. Check login
-  if (!check("cloudron", ["list"])) {
-    console.error("Error: not logged in to Cloudron.\\nRun: cloudron login");
-    process.exit(1);
-  }
-
-  // 3. Check Build Service
-  if (!check("cloudron", ["build", "info"])) {
-    console.error("Error: Build Service not configured.\\n");
-    console.error("1. Install the Docker Builder app on your Cloudron");
-    console.error("2. Run: cloudron build login\\n");
-    console.error("No Docker or registry needed \\u2014 the Build Service handles everything.");
-    process.exit(1);
-  }
-  console.log("Build Service OK.");
-
-  // 4. Get or ask for Docker repository
-  var cfg = loadConfig();
-  var repo = cfg.repository;
-  if (!repo) {
-    console.log("\\nA Docker registry is needed to store the built image.");
-    console.log("Examples:");
-    console.log("  - Cloudron Registry: registry.yourdomain.com/appname");
-    console.log("  - Docker Hub:        docker.io/username/appname\\n");
-    repo = await ask("Docker repository URL: ");
-    if (!repo) {
-      console.error("No repository provided. Aborting.");
-      process.exit(1);
-    }
-    cfg.repository = repo;
-    saveConfig(cfg);
-    console.log("Saved to .deploy-config.json (won't ask again).\\n");
-  } else {
-    console.log("Registry: " + repo + " (from .deploy-config.json)\\n");
-  }
-
-  // 5. Init git if needed (cloudron build requires a git repo)
-  if (!fs.existsSync(path.join(__dirname, ".git"))) {
-    console.log("Initializing git repo (required by cloudron build)...");
-    run("git", ["init"]);
-    run("git", ["add", "-A"]);
-    run("git", ["commit", "-m", "Initial package"]);
-  }
-
-  // 6. Build
-  console.log("Building image...");
-  run("cloudron", ["build", "--repository", repo]);
-
-  // 7. Install or update
-  var appDomain = process.argv[2];
-  if (appDomain) {
-    console.log("\\nUpdating app " + appDomain + "...");
-    run("cloudron", ["update", "--app", appDomain]);
-  } else {
-    console.log("\\nInstalling app...");
-    run("cloudron", ["install"]);
-  }
-
-  console.log("\\nDone!");
-}
-
-main();
-`;
-}
-
-/**
- * Generates deploy.cmd — Windows double-click launcher for deploy.js.
- * Keeps the window open after execution so the user can see the output.
- */
-export function generateDeployCmd() {
-  return '@echo off\r\nnode --no-deprecation "%~dp0deploy.js" %*\r\npause\r\n';
 }
 
 /**
@@ -911,6 +815,9 @@ export function generateNginxConf(config) {
     lines.push("");
 
     for (const sub of config.subcontainers) {
+      assertSafeDockerRef(sub.image, "nginx DooD image");
+      assertSafePort(sub.port || 80, "nginx DooD upstream port");
+      assertSafeRoutePath(sub.route || "/", "nginx DooD location");
       const name = "fp-" + sub.image.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-");
       const placeholder = name.toUpperCase().replace(/-/g, "_") + "_IP";
       const route = (sub.route || "/").endsWith("/") ? sub.route : sub.route + "/";
@@ -929,8 +836,10 @@ export function generateNginxConf(config) {
     // Default location
     lines.push("    location / {");
     lines.push("      default_type text/html;");
-    const links = config.subcontainers.map(s => `<li><a href="${s.route || "/"}">${s.image}</a></li>`).join("");
-    lines.push(`      return 200 '<h1>${config.title || "DooD App"}</h1><ul>${links}</ul>';`);
+    const links = config.subcontainers
+      .map(s => `<li><a href="${escapeHtml(s.route || "/")}">${escapeHtml(s.image)}</a></li>`)
+      .join("");
+    lines.push(`      return 200 '<h1>${escapeHtml(config.title || "DooD App")}</h1><ul>${links}</ul>';`);
     lines.push("    }");
 
     lines.push("  }");

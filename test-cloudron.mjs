@@ -3,7 +3,7 @@
 // test-cloudron.mjs — End-to-end Cloudron integration tests.
 // Generates packages → docker build → push to VM → cloudron install → verify → uninstall.
 // Usage: node test-cloudron.mjs [--filter NAME]
-// Requires: cloudron CLI logged in, Docker running, SSH to 192.168.60.17
+// Requires: cloudron CLI logged in, Docker running, and FASTPACK_E2E_* environment variables.
 
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -17,9 +17,15 @@ import {
   generateNginxConf,
 } from "./generators.js";
 
-const DOMAIN = "192.168.60.17.nip.io";
-const VM_HOST = "fastpack@192.168.60.17";
+const DOMAIN = process.env.FASTPACK_E2E_CLOUDRON_DOMAIN || "";
+const VM_HOST = process.env.FASTPACK_E2E_SSH_HOST || "";
+const SUDO_PASSWORD = process.env.FASTPACK_E2E_SUDO_PASSWORD || "";
 const FILTER = process.argv.find((a, i) => process.argv[i - 1] === "--filter") || "";
+
+function skip(reason) {
+  console.log(`SKIP: ${reason}`);
+  process.exit(0);
+}
 
 function patchStartSh(startSh, appCommand) {
   return startSh.replace("YOUR_APP_COMMAND", appCommand).replace("YOUR_SERVICE_COMMAND", appCommand);
@@ -290,7 +296,7 @@ async function testConfig(tc) {
       const scp = run("scp", [tarPath, `${VM_HOST}:/tmp/fp-e2e.tar`], { timeout: 120_000 });
       if (!scp.ok) return scp;
       return run("ssh", [VM_HOST,
-        "echo fastpack | sudo -S docker load -i /tmp/fp-e2e.tar && rm /tmp/fp-e2e.tar"], { timeout: 60_000 });
+        `printf '%s\\n' '${SUDO_PASSWORD.replace(/'/g, "'\\''")}' | sudo -S docker load -i /tmp/fp-e2e.tar && rm /tmp/fp-e2e.tar`], { timeout: 60_000 });
     });
     if (!pushResult.ok) return false;
 
@@ -315,12 +321,16 @@ async function testConfig(tc) {
     }
     // Cleanup
     spawnSync("docker", ["rmi", imageTag], { stdio: "ignore" });
-    spawnSync("ssh", [VM_HOST, `echo fastpack | sudo -S docker rmi ${imageTag} 2>/dev/null`], { stdio: "ignore" });
+    spawnSync("ssh", [VM_HOST, `printf '%s\\n' '${SUDO_PASSWORD.replace(/'/g, "'\\''")}' | sudo -S docker rmi ${imageTag} 2>/dev/null`], { stdio: "ignore" });
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* Windows temp file lock */ }
   }
 }
 
 // Main
+if (!DOMAIN) skip("set FASTPACK_E2E_CLOUDRON_DOMAIN to run live Cloudron integration tests");
+if (!VM_HOST) skip("set FASTPACK_E2E_SSH_HOST to run live Cloudron integration tests");
+if (!SUDO_PASSWORD) skip("set FASTPACK_E2E_SUDO_PASSWORD to push Docker images to the Cloudron host");
+
 const configs = FILTER
   ? TEST_CONFIGS.filter(c => c.name.includes(FILTER))
   : TEST_CONFIGS;

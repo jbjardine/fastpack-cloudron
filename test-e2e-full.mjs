@@ -2,7 +2,7 @@
 
 // test-e2e-full.mjs — Exhaustive E2E tests on real Cloudron
 // Usage: node test-e2e-full.mjs [--filter NAME]
-// Requires: cloudron CLI logged in, SSH to 192.168.60.17, sudo password "fastpack"
+// Requires: cloudron CLI logged in and FASTPACK_E2E_* environment variables.
 
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
@@ -16,10 +16,16 @@ import {
   generateNginxConf,
 } from "./generators.js";
 
-const DOMAIN = "192.168.60.17.nip.io";
-const VM_HOST = "fastpack@192.168.60.17";
-const REGISTRY = `devtools.${DOMAIN}`;
+const DOMAIN = process.env.FASTPACK_E2E_CLOUDRON_DOMAIN || "";
+const VM_HOST = process.env.FASTPACK_E2E_SSH_HOST || "";
+const SUDO_PASSWORD = process.env.FASTPACK_E2E_SUDO_PASSWORD || "";
+const REGISTRY = process.env.FASTPACK_E2E_REGISTRY || (DOMAIN ? `devtools.${DOMAIN}` : "");
 const FILTER = process.argv.find((a, i) => process.argv[i - 1] === "--filter") || "";
+
+function skip(reason) {
+  console.log(`SKIP: ${reason}`);
+  process.exit(0);
+}
 
 function run(cmd, args, opts = {}) {
   // Use shell:true only for cloudron CLI on Windows (it's a .cmd wrapper)
@@ -34,7 +40,7 @@ function ssh(command) {
 
 function sshSudo(command) {
   // On Windows with shell:true, we need to escape properly
-  return run("ssh", [VM_HOST, `echo fastpack | sudo -S bash -c "${command.replace(/"/g, '\\"')}"`]);
+  return run("ssh", [VM_HOST, `printf '%s\\n' '${SUDO_PASSWORD.replace(/'/g, "'\\''")}' | sudo -S bash -c "${command.replace(/"/g, '\\"')}"`]);
 }
 
 function patchStartSh(startSh, appCommand) {
@@ -426,6 +432,10 @@ async function runTest(test) {
 // ═══════════════════════════════════════════════
 
 async function main() {
+  if (!DOMAIN) skip("set FASTPACK_E2E_CLOUDRON_DOMAIN to run live Cloudron E2E tests");
+  if (!VM_HOST) skip("set FASTPACK_E2E_SSH_HOST to run live Cloudron E2E tests");
+  if (!SUDO_PASSWORD) skip("set FASTPACK_E2E_SUDO_PASSWORD to run Docker build/push checks on the Cloudron host");
+
   console.log("FastPackCloudron — Exhaustive E2E Tests");
   console.log("═══════════════════════════════════════");
   console.log(`Testing ${TEST_CONFIGS.length} configs on ${DOMAIN}\n`);

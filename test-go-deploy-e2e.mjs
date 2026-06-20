@@ -13,7 +13,7 @@
 // 8. Cleanup (uninstall via cloudron CLI)
 //
 // Usage: node test-go-deploy-e2e.mjs
-// Requires: Playwright, cloudron CLI logged in, network access to 192.168.60.17
+// Requires: Playwright and FASTPACK_E2E_* environment variables.
 
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, copyFileSync, rmSync } from "node:fs";
@@ -21,23 +21,41 @@ import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as sleep } from "node:timers/promises";
 
-const CLOUDRON_URL = "https://my.192.168.60.17.nip.io";
-const CLOUDRON_DOMAIN = "192.168.60.17.nip.io";
-const VM_HOST = "fastpack@192.168.60.17";
-const SUBDOMAIN = "fpgo";
+function skip(reason) {
+  console.log(`SKIP: ${reason}`);
+  process.exit(0);
+}
+
+const CLOUDRON_URL = process.env.FASTPACK_E2E_CLOUDRON_URL || "";
+if (!CLOUDRON_URL) skip("set FASTPACK_E2E_CLOUDRON_URL to run this live Cloudron E2E test");
+
+const CLOUDRON_DOMAIN = process.env.FASTPACK_E2E_CLOUDRON_DOMAIN || new URL(CLOUDRON_URL).hostname.replace(/^my\./, "");
+const VM_HOST = process.env.FASTPACK_E2E_SSH_HOST || "";
+if (!VM_HOST) skip("set FASTPACK_E2E_SSH_HOST to verify the deployed app from the Cloudron host");
+
+const SUBDOMAIN = process.env.FASTPACK_E2E_SUBDOMAIN || "fpgo";
 const APP_URL = `https://${SUBDOMAIN}.${CLOUDRON_DOMAIN}`;
-const GO_BINARY = "deploy-cli/dist/fastpack-deploy-windows-amd64.exe";
+const DEFAULT_BINARY_BY_PLATFORM = {
+  win32: "deploy-cli/dist/fastpack-deploy-windows-amd64.exe",
+  darwin: process.arch === "arm64" ? "deploy-cli/dist/fastpack-deploy-darwin-arm64" : "deploy-cli/dist/fastpack-deploy-darwin-amd64",
+  linux: "deploy-cli/dist/fastpack-deploy-linux-amd64",
+};
+const GO_BINARY = process.env.FASTPACK_E2E_GO_BINARY || DEFAULT_BINARY_BY_PLATFORM[process.platform] || DEFAULT_BINARY_BY_PLATFORM.linux;
 
 // This E2E targets a dev Cloudron with self-signed TLS.
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-// Read token from cloudron config for the legacy env-var flow.
-const cloudronConfig = JSON.parse(readFileSync(join(process.env.HOME || process.env.USERPROFILE, ".cloudron.json"), "utf8"));
-const API_TOKEN = cloudronConfig.cloudrons["my.192.168.60.17.nip.io"]?.token;
-if (!API_TOKEN) {
-  console.error("Cannot find API token for my.192.168.60.17.nip.io in ~/.cloudron.json");
-  process.exit(1);
+function loadApiToken() {
+  if (process.env.CLOUDRON_TOKEN) return process.env.CLOUDRON_TOKEN;
+  try {
+    const cloudronConfig = JSON.parse(readFileSync(join(process.env.HOME || process.env.USERPROFILE, ".cloudron.json"), "utf8"));
+    return cloudronConfig.cloudrons[new URL(CLOUDRON_URL).hostname]?.token || "";
+  } catch {
+    return "";
+  }
 }
+const API_TOKEN = loadApiToken();
+if (!API_TOKEN) skip("set CLOUDRON_TOKEN, or log in with the Cloudron CLI for the configured FASTPACK_E2E_CLOUDRON_URL");
 
 const PORT = 8767;
 const UI_URL = `http://127.0.0.1:${PORT}/index.html`;
@@ -199,7 +217,7 @@ async function main() {
   // Run the Go binary with the backward-compatible token env var.
   // In v2, the CLI uploads sourceArchive directly to Cloudron, so the interactive
   // prompts are just Cloudron URL + subdomain in this flow.
-  const input = `my.${CLOUDRON_DOMAIN}\n${SUBDOMAIN}\n`;
+  const input = `${CLOUDRON_URL}\n${SUBDOMAIN}\n`;
 
   console.log(`  Running: ${basename(GO_BINARY)} in ${extractDir}`);
   console.log(`  Target: ${CLOUDRON_URL} → ${SUBDOMAIN}.${CLOUDRON_DOMAIN}`);
