@@ -68,6 +68,8 @@ function escapeHtml(value) {
 const CLOUDRON_UID = 808;
 const APP_CODE_DIR = "/app/code";
 const APP_DATA_DIR = "/app/data";
+const DOCKER_CLI_VERSION = "27.5.1";
+const DOCKER_CLI_SHA256 = "4f798b3ee1e0140eab5bf30b0edc4e84f4cdb53255a429dc3bbae9524845d640";
 const MANIFEST_VERSION = 2;
 
 // Re-export regex patterns for use by validation in app.js
@@ -396,8 +398,8 @@ export function generateDockerfile(config) {
   const hasSubcontainers = config.subcontainers && config.subcontainers.length > 0;
   if (hasSubcontainers) {
     lines.push("# Install Docker CLI (static binary) for DooD sub-containers");
-    lines.push("ADD https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz /tmp/docker.tgz");
-    lines.push("RUN tar -xzf /tmp/docker.tgz -C /tmp && mv /tmp/docker/docker /usr/local/bin/docker && rm -rf /tmp/docker /tmp/docker.tgz");
+    lines.push(`ADD https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz /tmp/docker.tgz`);
+    lines.push(`RUN echo "${DOCKER_CLI_SHA256}  /tmp/docker.tgz" | sha256sum -c - && tar -xzf /tmp/docker.tgz -C /tmp && mv /tmp/docker/docker /usr/local/bin/docker && rm -rf /tmp/docker /tmp/docker.tgz`);
     lines.push("");
   }
 

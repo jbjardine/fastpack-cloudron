@@ -1368,6 +1368,8 @@
     // Dockerfile includes Docker CLI
     const doodDockerfile = generateDockerfile(doodConfig);
     assertIncludes("dood: Dockerfile has Docker CLI", doodDockerfile, "docker-27");
+    assertIncludes("dood: Dockerfile verifies Docker CLI checksum", doodDockerfile, "sha256sum -c -");
+    assertIncludes("dood: Dockerfile pins Docker CLI SHA256", doodDockerfile, "4f798b3ee1e0140eab5bf30b0edc4e84f4cdb53255a429dc3bbae9524845d640");
     assertIncludes("dood: Dockerfile has nginx", doodDockerfile, "nginx");
     assertIncludes("dood: Dockerfile has nginx template", doodDockerfile, "nginx.conf.template");
 

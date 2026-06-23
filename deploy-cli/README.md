@@ -2,7 +2,7 @@
 
 Zero-dependency Cloudron deployer for users. Uploads a source archive to Cloudron's custom-app install/update API — no Build Service, Docker Registry, or local Docker needed.
 
-**Version**: 2.1.2 | **Platforms**: Windows, macOS (Intel + ARM), Linux | **Binary size**: ~6 MB
+**Version**: 2.1.3 | **Platforms**: Windows, macOS (Intel + ARM), Linux | **Binary size**: ~6 MB
 
 ## Quick Start
 
@@ -78,7 +78,7 @@ You can also use an API token instead of username/password and optionally pin th
 }
 ```
 
-The CLI only prompts for missing values, so with the file above the technician can enter just the app name/subdomain when needed. To keep credentials outside the package folder, set `FASTPACK_DEPLOY_CONFIG=/path/to/deploy.json`. `CLOUDRON_TOKEN` still overrides any token from the config file for existing scripts. Use `allowSelfSigned` to explicitly enable or disable self-signed certificate support for dev-looking Cloudron URLs.
+The CLI only prompts for missing values, so with the file above the technician can enter just the app name/subdomain when needed. When a config file supplies `cloudronUrl`, the CLI asks you to confirm the exact destination before sending credentials or tokens. To keep credentials outside the package folder, set `FASTPACK_DEPLOY_CONFIG=/path/to/deploy.json`. `CLOUDRON_TOKEN` still overrides any token from the config file for existing scripts. Use `allowSelfSigned` to explicitly enable or disable self-signed certificate support for dev-looking Cloudron URLs.
 
 ## What Gets Deployed
 
@@ -95,7 +95,7 @@ Only these files are packaged (strict allow-list):
 | `DESCRIPTION.md`, `CHANGELOG.md`, `README.md` | No |
 | `CloudronVersions.json` | No |
 
-All other files are excluded — no `.env`, no `node_modules`, no secrets.
+All other files are excluded — no `.env`, no `node_modules`, no secrets. Allowed entries must be regular files; symlinks are rejected instead of being followed.
 
 ## Auto-Detection
 
@@ -126,15 +126,20 @@ deploy-cli/
 │   │   └── integration_test.go  # Full flow E2E tests (login → install → update)
 │   ├── archive/
 │   │   ├── tarball.go           # Allow-list tar.gz creation
-│   │   └── tarball_test.go      # 14 tests including security checks
+│   │   └── tarball_test.go      # 15 tests including security checks
 │   └── wizard/
 │       ├── wizard.go            # Interactive 3-step wizard + 2FA + legacy flow
-│       └── wizard_test.go       # 33 tests including mutation-killing tests
+│       └── wizard_test.go       # 34 tests including mutation-killing tests
 ├── Makefile                     # Cross-compilation targets
 └── go.mod                       # Go 1.26.4, no runtime dependency for users
 ```
 
 ## Changelog
+
+### v2.1.3
+- **Deploy config safety**: config-supplied Cloudron URLs must be confirmed before credentials or tokens are sent
+- **Archive hardening**: source archives reject symlinks and non-regular files instead of following them
+- **DooD integrity**: generated Dockerfiles verify the Docker CLI tarball checksum before installing it
 
 ### v2.1.2
 - **Public-readiness hardening**: rebuilds target Go 1.26.4 and updated `golang.org/x/sys`/`x/term`

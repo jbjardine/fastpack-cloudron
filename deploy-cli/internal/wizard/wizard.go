@@ -69,7 +69,7 @@ func RunWithIO(r io.Reader, w io.Writer) (*Config, error) {
 
 func runWithReader(reader *bufio.Reader, w io.Writer) (*Config, error) {
 	config := &Config{}
-	loadedFrom, allowSelfSignedSet, err := loadFileConfig(config)
+	loadedFrom, cloudronURLFromFile, allowSelfSignedSet, err := loadFileConfig(config)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func runWithReader(reader *bufio.Reader, w io.Writer) (*Config, error) {
 	}
 
 	if config.Token != "" {
-		return runTokenFlow(reader, w, config, loadedFrom == "" && envToken != "", allowSelfSignedSet)
+		return runTokenFlow(reader, w, config, loadedFrom, cloudronURLFromFile, loadedFrom == "" && envToken != "", allowSelfSignedSet)
 	}
 
 	// v2.0 flow: URL → Username → Password (only prompts for missing values)
@@ -105,6 +105,9 @@ func runWithReader(reader *bufio.Reader, w io.Writer) (*Config, error) {
 		if err := parseAndSetURL(config, rawURL); err != nil {
 			return nil, err
 		}
+	}
+	if err := confirmFileConfigCloudronURL(reader, w, loadedFrom, cloudronURLFromFile, config.CloudronURL); err != nil {
+		return nil, err
 	}
 
 	// --- Step 2: Username ---
@@ -149,7 +152,7 @@ func runWithReader(reader *bufio.Reader, w io.Writer) (*Config, error) {
 }
 
 // runTokenFlow handles API-token deployment from the environment or config file.
-func runTokenFlow(reader *bufio.Reader, w io.Writer, config *Config, fromEnv bool, allowSelfSignedSet bool) (*Config, error) {
+func runTokenFlow(reader *bufio.Reader, w io.Writer, config *Config, loadedFrom string, cloudronURLFromFile bool, fromEnv bool, allowSelfSignedSet bool) (*Config, error) {
 	if fromEnv {
 		fmt.Fprintln(w, "   Using API token from CLOUDRON_TOKEN environment variable.")
 	}
@@ -168,6 +171,9 @@ func runTokenFlow(reader *bufio.Reader, w io.Writer, config *Config, fromEnv boo
 		if err := parseAndSetURL(config, rawURL); err != nil {
 			return nil, err
 		}
+	}
+	if err := confirmFileConfigCloudronURL(reader, w, loadedFrom, cloudronURLFromFile, config.CloudronURL); err != nil {
+		return nil, err
 	}
 
 	// --- Step 2: Subdomain ---
@@ -262,7 +268,23 @@ func ask2FAWithReader(reader *bufio.Reader, w io.Writer) (string, error) {
 	return code, nil // TOTP codes are numeric, trimming whitespace is safe
 }
 
-func loadFileConfig(config *Config) (string, bool, error) {
+func confirmFileConfigCloudronURL(reader *bufio.Reader, w io.Writer, loadedFrom string, cloudronURLFromFile bool, cloudronURL string) error {
+	if loadedFrom == "" || !cloudronURLFromFile {
+		return nil
+	}
+	fmt.Fprintf(w, "\n   Deploy config selected Cloudron URL: %s\n", cloudronURL)
+	fmt.Fprint(w, "   Type 'yes' to trust this deploy config before sending credentials: ")
+	answer, err := readLine(reader)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(answer), "yes") {
+		return fmt.Errorf("deploy config Cloudron URL was not confirmed")
+	}
+	return nil
+}
+
+func loadFileConfig(config *Config) (string, bool, bool, error) {
 	path := strings.TrimSpace(os.Getenv("FASTPACK_DEPLOY_CONFIG"))
 	if path == "" {
 		path = "fastpack-deploy.json"
@@ -271,17 +293,18 @@ func loadFileConfig(config *Config) (string, bool, error) {
 	b, err := os.ReadFile(cleanPath)
 	if err != nil {
 		if os.IsNotExist(err) && os.Getenv("FASTPACK_DEPLOY_CONFIG") == "" {
-			return "", false, nil
+			return "", false, false, nil
 		}
-		return "", false, fmt.Errorf("cannot read deploy config %s: %w", cleanPath, err)
+		return "", false, false, fmt.Errorf("cannot read deploy config %s: %w", cleanPath, err)
 	}
 	var fc FileConfig
 	if err := json.Unmarshal(b, &fc); err != nil {
-		return "", false, fmt.Errorf("invalid deploy config %s: %w", cleanPath, err)
+		return "", false, false, fmt.Errorf("invalid deploy config %s: %w", cleanPath, err)
 	}
+	cloudronURLSet := strings.TrimSpace(fc.CloudronURL) != ""
 	if fc.CloudronURL != "" {
 		if err := parseAndSetURL(config, fc.CloudronURL); err != nil {
-			return "", false, fmt.Errorf("invalid cloudronUrl in %s: %w", cleanPath, err)
+			return "", false, false, fmt.Errorf("invalid cloudronUrl in %s: %w", cleanPath, err)
 		}
 	}
 	config.Username = strings.TrimSpace(fc.Username)
@@ -289,12 +312,12 @@ func loadFileConfig(config *Config) (string, bool, error) {
 	config.Token = strings.TrimSpace(fc.Token)
 	config.Subdomain = strings.TrimSpace(fc.Subdomain)
 	if config.Subdomain != "" && !ValidSubdomain.MatchString(config.Subdomain) {
-		return "", false, fmt.Errorf("invalid subdomain %q in %s: must contain only lowercase letters, digits, and hyphens", config.Subdomain, cleanPath)
+		return "", false, false, fmt.Errorf("invalid subdomain %q in %s: must contain only lowercase letters, digits, and hyphens", config.Subdomain, cleanPath)
 	}
 	if fc.AllowSelfSigned != nil {
 		config.AllowSelfSigned = *fc.AllowSelfSigned
 	}
-	return cleanPath, fc.AllowSelfSigned != nil, nil
+	return cleanPath, cloudronURLSet, fc.AllowSelfSigned != nil, nil
 }
 
 // parseAndSetURL validates and normalizes the Cloudron URL into config.

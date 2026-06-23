@@ -538,7 +538,7 @@ func TestRunWithIO_FileConfigFullV2Flow(t *testing.T) {
 	}
 
 	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(strings.NewReader(""), out)
+	cfg, err := RunWithIO(strings.NewReader("yes\n"), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,8 +551,41 @@ func TestRunWithIO_FileConfigFullV2Flow(t *testing.T) {
 	if !strings.Contains(out.String(), "Using deploy config") {
 		t.Fatal("expected deploy config message")
 	}
+	if !strings.Contains(out.String(), "Deploy config selected Cloudron URL") {
+		t.Fatal("expected deploy config URL confirmation")
+	}
 	if strings.Contains(out.String(), "Step 1/3") || strings.Contains(out.String(), "Step 2/3") || strings.Contains(out.String(), "Step 3/3") {
 		t.Fatal("did not expect prompts for configured fields")
+	}
+}
+
+func TestRunWithIO_FileConfigRejectsUnconfirmedCloudronURL(t *testing.T) {
+	dir := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWd)
+
+	configJSON := `{"cloudronUrl":"attacker.example.com","token":"tok","subdomain":"myapp"}`
+	if err := os.WriteFile("fastpack-deploy.json", []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := new(bytes.Buffer)
+	_, err = RunWithIO(strings.NewReader("no\n"), out)
+	if err == nil || !strings.Contains(err.Error(), "not confirmed") {
+		t.Fatalf("expected unconfirmed deploy config URL error, got %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "Deploy config selected Cloudron URL: https://attacker.example.com") {
+		t.Fatal("expected exact configured Cloudron URL in confirmation prompt")
+	}
+	if strings.Contains(output, "Choose a subdomain") {
+		t.Fatal("must confirm file-sourced Cloudron URL before continuing token flow")
 	}
 }
 
@@ -573,7 +606,7 @@ func TestRunWithIO_FileConfigPromptsForMissingPassword(t *testing.T) {
 	}
 
 	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(strings.NewReader("secret\n"), out)
+	cfg, err := RunWithIO(strings.NewReader("yes\nsecret\n"), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,7 +640,7 @@ func TestRunWithIO_FileConfigHonorsExplicitAllowSelfSignedFalse(t *testing.T) {
 	}
 
 	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(strings.NewReader(""), out)
+	cfg, err := RunWithIO(strings.NewReader("yes\n"), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -641,7 +674,7 @@ func TestRunWithIO_FileConfigHonorsExplicitAllowSelfSignedFalseWithToken(t *test
 	}
 
 	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(strings.NewReader(""), out)
+	cfg, err := RunWithIO(strings.NewReader("yes\n"), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -675,7 +708,7 @@ func TestRunWithIO_FileConfigWarnsForExplicitAllowSelfSignedTrue(t *testing.T) {
 	}
 
 	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(strings.NewReader(""), out)
+	cfg, err := RunWithIO(strings.NewReader("yes\n"), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -709,7 +742,7 @@ func TestRunWithIO_FileConfigWarnsForExplicitAllowSelfSignedTrueWithToken(t *tes
 	}
 
 	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(strings.NewReader(""), out)
+	cfg, err := RunWithIO(strings.NewReader("yes\n"), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -731,7 +764,7 @@ func TestRunWithIO_CustomFileConfigPath(t *testing.T) {
 	t.Setenv("FASTPACK_DEPLOY_CONFIG", path)
 
 	out := new(bytes.Buffer)
-	cfg, err := RunWithIO(strings.NewReader(""), out)
+	cfg, err := RunWithIO(strings.NewReader("yes\n"), out)
 	if err != nil {
 		t.Fatal(err)
 	}

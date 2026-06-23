@@ -163,6 +163,23 @@ func TestCreateTarball_OnlyAllowListIncluded(t *testing.T) {
 	}
 }
 
+func TestCreateTarball_RejectsSymlinkAllowedFile(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "CloudronManifest.json"), []byte(`{}`), 0644)
+	os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM nginx"), 0644)
+
+	secretPath := filepath.Join(dir, "secret.txt")
+	os.WriteFile(secretPath, []byte("SECRET-MARKER"), 0644)
+	if err := os.Symlink(secretPath, filepath.Join(dir, "README.md")); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+
+	_, err := CreateTarball(dir)
+	if err == nil || !strings.Contains(err.Error(), "refusing symlink README.md") {
+		t.Fatalf("expected symlink rejection for allowed README.md, got %v", err)
+	}
+}
+
 func TestCreateTarball_SizeLimit(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "CloudronManifest.json"), []byte(`{}`), 0644)

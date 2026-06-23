@@ -57,7 +57,7 @@ func CreateTarball(dir string) (string, error) {
 
 	for _, name := range allowedFiles {
 		fullPath := filepath.Join(dir, name)
-		info, err := os.Stat(fullPath)
+		info, err := os.Lstat(fullPath)
 		if os.IsNotExist(err) {
 			continue // Optional files are silently skipped
 		}
@@ -66,27 +66,15 @@ func CreateTarball(dir string) (string, error) {
 			gw.Close()
 			return cleanup(fmt.Errorf("cannot stat %s: %w", name, err))
 		}
-
-		// Enforce size limit
-		totalSize += info.Size()
-		if totalSize > MaxTarballSize {
+		if info.Mode()&os.ModeSymlink != 0 {
 			tw.Close()
 			gw.Close()
-			return cleanup(fmt.Errorf("package exceeds %d MB size limit", MaxTarballSize/(1024*1024)))
+			return cleanup(fmt.Errorf("refusing symlink %s", name))
 		}
-
-		header, err := tar.FileInfoHeader(info, "")
-		if err != nil {
+		if !info.Mode().IsRegular() {
 			tw.Close()
 			gw.Close()
-			return cleanup(fmt.Errorf("tar header error for %s: %w", name, err))
-		}
-		header.Name = name
-
-		if err := tw.WriteHeader(header); err != nil {
-			tw.Close()
-			gw.Close()
-			return cleanup(fmt.Errorf("write header %s: %w", name, err))
+			return cleanup(fmt.Errorf("refusing non-regular file %s", name))
 		}
 
 		f, err := os.Open(fullPath)
@@ -95,6 +83,45 @@ func CreateTarball(dir string) (string, error) {
 			gw.Close()
 			return cleanup(fmt.Errorf("open %s: %w", name, err))
 		}
+		openedInfo, err := f.Stat()
+		if err != nil {
+			f.Close()
+			tw.Close()
+			gw.Close()
+			return cleanup(fmt.Errorf("stat opened %s: %w", name, err))
+		}
+		if !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
+			f.Close()
+			tw.Close()
+			gw.Close()
+			return cleanup(fmt.Errorf("refusing changed file %s", name))
+		}
+
+		// Enforce size limit
+		totalSize += openedInfo.Size()
+		if totalSize > MaxTarballSize {
+			f.Close()
+			tw.Close()
+			gw.Close()
+			return cleanup(fmt.Errorf("package exceeds %d MB size limit", MaxTarballSize/(1024*1024)))
+		}
+
+		header, err := tar.FileInfoHeader(openedInfo, "")
+		if err != nil {
+			f.Close()
+			tw.Close()
+			gw.Close()
+			return cleanup(fmt.Errorf("tar header error for %s: %w", name, err))
+		}
+		header.Name = name
+
+		if err := tw.WriteHeader(header); err != nil {
+			f.Close()
+			tw.Close()
+			gw.Close()
+			return cleanup(fmt.Errorf("write header %s: %w", name, err))
+		}
+
 		if _, err := io.Copy(tw, f); err != nil {
 			f.Close()
 			tw.Close()
